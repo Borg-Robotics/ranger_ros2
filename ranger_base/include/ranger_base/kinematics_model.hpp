@@ -87,7 +87,7 @@ class SpinningModel {
   SpinningModel(control_type u) : u_(u){};
 
   // x1 = x, x2 = y, x3 = theta
-  void operator()(const state_type& x, state_type& xd, double) {
+  void operator()(const state_type& /*x*/, state_type& xd, double) {
     xd[0] = 0;
     xd[1] = 0;
     xd[2] = u_.w;
