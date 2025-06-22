@@ -30,9 +30,13 @@ set(srv_file
 "srv/TriggerParkMode.srv"
 )
 
+set(action_file
+"action/ArucoFollow.action"
+)
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${msg_file}
   ${srv_file}
+  ${action_file}
   DEPENDENCIES 
     builtin_interfaces std_msgs)
 
