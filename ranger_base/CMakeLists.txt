@@ -23,6 +23,7 @@ find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(ros2_aruco_interfaces REQUIRED)
 find_package(ranger_msgs REQUIRED)
 find_package(ugv_sdk REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
@@ -32,16 +33,26 @@ include_directories(
   # ${EIGEN3_INCLUDE_DIR}
 )
 
+# ranger_base_node
 add_executable(ranger_base_node
     src/ranger_base_node.cpp
     src/ranger_messenger.cpp)
-
+    
 target_link_libraries(ranger_base_node ugv_sdk)
 ament_target_dependencies(ranger_base_node rclcpp tf2 tf2_ros std_msgs nav_msgs sensor_msgs ranger_msgs tf2_geometry_msgs)
 
 install(TARGETS ranger_base_node
   DESTINATION lib/${PROJECT_NAME})
 
+# ranger_server node
+add_executable(ranger_server
+    src/ranger_server.cpp)
+ament_target_dependencies(ranger_server rclcpp rclcpp_action ranger_msgs ros2_aruco_interfaces geometry_msgs tf2 tf2_geometry_msgs)
+
+install(TARGETS ranger_server
+  DESTINATION lib/${PROJECT_NAME})
+
+# launch files
 install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}/)
 
