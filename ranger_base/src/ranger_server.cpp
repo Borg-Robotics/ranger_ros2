@@ -2,6 +2,12 @@
 // Author: Ziad Ammar
 // Date: 22-6-2025
 // Description: ROS 2 node for ranger_base package to be server of ros2 services and actions for Ranger mobile base
+// TODO LIST:
+// [ ] Use ROS2 Parameters for default values and dynamic reconfiguration
+// [ ] Parking Mode Service Implementation
+// [ ] Search For Marker Action Implementation
+// [ ] Integrate diagnostics and status publishing
+// [ ] Update documentation 
 
 #include <memory>
 #include <chrono>
@@ -33,8 +39,12 @@ public:
       action_active(false),
       marker_detected(false),
       min_distance(0.75),
-      linear_speed(0.75),
-      angular_speed(0.75)
+      linear_vel(0.5),
+      angular_vel(0.75),
+      distance_to_marker(-1.0),
+      curr_linear_vel(0.0),
+      curr_angular_vel(0.0),
+      min_linear_vel(0.35)
     {
         RCLCPP_INFO(this->get_logger(), "RangerServer node has been started.");
 
@@ -46,6 +56,10 @@ public:
             std::bind(&RangerServer::handle_cancel, this, std::placeholders::_1),
             std::bind(&RangerServer::handle_accepted, this, std::placeholders::_1));
 
+        // Initialize action result and feedback
+        result   = std::make_shared<ArucoFollow::Result>();
+        feedback = std::make_shared<ArucoFollow::Feedback>();
+        
         // Create subscribers and publishers
         aruco_subscriber = this->create_subscription<ros2_aruco_interfaces::msg::ArucoMarkers>(
             "/aruco_markers", 10,
@@ -71,6 +85,12 @@ private:
     // Timer
     rclcpp::TimerBase::SharedPtr control_timer;
     
+    // Action Result
+    std::shared_ptr<ArucoFollow::Result> result;
+
+    // Action Feedback 
+    std::shared_ptr<ArucoFollow::Feedback> feedback;
+    
     // Current goal handle
     std::shared_ptr<GoalHandleArucoFollow> current_goal_handle;
     
@@ -82,9 +102,15 @@ private:
     rclcpp::Time last_marker_time;
     
     // Parameters
-    double min_distance;
-    double linear_speed;
-    double angular_speed;
+    float min_distance;
+    float linear_vel;
+    float angular_vel;
+    // Feedback variables
+    float distance_to_marker;
+    float curr_linear_vel;
+    float curr_angular_vel;
+
+    float min_linear_vel;
 
     // Goal handling
     rclcpp_action::GoalResponse handle_goal(
@@ -118,16 +144,51 @@ private:
 
     void handle_accepted(const std::shared_ptr<GoalHandleArucoFollow> goal_handle)
     {
-        // Start the action execution
-        target_marker_id    = goal_handle->get_goal()->marker_id;
-        current_goal_handle = goal_handle;
-        action_active       = true;
-        marker_detected     = false;
+        // Get goal request parameters
+        auto goal = goal_handle->get_goal();
+        // Mandatory request parameters
+        target_marker_id = goal->marker_id;
+        min_distance     = goal->min_distance;
+        // Optional parameters with defaults
+        linear_vel  = (goal->linear_vel > 0.0) ? goal->linear_vel : linear_vel;
+        angular_vel = (goal->angular_vel > 0.0) ? goal->angular_vel : angular_vel;
         
-        RCLCPP_INFO(this->get_logger(), "Starting to follow marker ID: %ld", target_marker_id);
-        
-        // Check if aruco_markers topic is available
-        check_aruco_topic_availability();
+        // Check validity of goal parameters
+        bool valid = true;
+        std::string missing_fields;
+
+        // Check if marker_id is specified
+        if (target_marker_id <= 0) {
+            valid = false;
+            missing_fields += "marker_id ";
+        }
+        // Check if min_distance is specified
+        if (min_distance <= 0.0) {
+            valid = false;
+            missing_fields += "min_distance ";
+        }
+
+        if (valid) {
+            current_goal_handle = goal_handle;
+            action_active       = true;
+            marker_detected     = false;
+
+            RCLCPP_INFO(this->get_logger(), 
+                "Starting to follow marker ID: %ld | min_distance: %.2f | linear_vel: %.2f | angular_vel: %.2f",
+                target_marker_id, min_distance, linear_vel, angular_vel);
+
+            // Check if aruco_markers topic is available
+            check_aruco_topic_availability();
+        } else {
+            action_active = false;
+            RCLCPP_WARN(this->get_logger(),
+                "Action request missing required field(s) or incorrect values: %s. Please specify them in the action request.",
+                missing_fields.c_str());
+            result->success = false;
+            result->message = "Action request failed due to missing or invalid parameters: " + missing_fields;
+            goal_handle->abort(result);
+            return;
+        }
     }
 
     void check_aruco_topic_availability()
@@ -189,23 +250,23 @@ private:
             return;
         }
         
-        // Calculate distance to marker
-        double distance = calculate_distance_to_marker();
+        // Calculate distance to marker 
+        distance_to_marker = calculate_distance_to_marker();
         
         // Send feedback
-        auto feedback = std::make_shared<ArucoFollow::Feedback>();
-        feedback->distance_to_marker = static_cast<float>(distance);
+        feedback->distance_to_marker = std::round(distance_to_marker * 1000.0f) / 1000.0f;
+        feedback->curr_linear_vel    = std::round(curr_linear_vel * 1000.0f) / 1000.0f;
+        feedback->curr_angular_vel   = std::round(curr_angular_vel * 1000.0f) / 1000.0f;
         current_goal_handle->publish_feedback(feedback);
         
         // Check if we've reached the minimum distance
-        if (distance <= min_distance) {
+        if (distance_to_marker <= min_distance) {
             RCLCPP_INFO(this->get_logger(), 
                 "Reached minimum distance (%.2f m) to marker %ld", min_distance, target_marker_id);
             
             stop_robot();
             
             // Send success result
-            auto result = std::make_shared<ArucoFollow::Result>();
             result->message = "Successfully reached marker " + std::to_string(target_marker_id);
             result->success = true;
             
@@ -218,7 +279,7 @@ private:
         move_towards_marker();
     }
 
-    double calculate_distance_to_marker()
+    float calculate_distance_to_marker()
     {
         return std::sqrt(
             std::pow(current_marker_pose.position.x, 2) +
@@ -231,36 +292,38 @@ private:
         auto twist_msg = geometry_msgs::msg::Twist();
         
         // Calculate angle to marker
-        double angle_to_marker = std::atan2(
+        float angle_to_marker = std::atan2(
             current_marker_pose.position.y,
             current_marker_pose.position.x
         );
         
-        // Calculate distance
-        double distance = calculate_distance_to_marker();
-        
         // Angular velocity (turn towards marker)
         if (std::abs(angle_to_marker) > 0.1) { // 0.1 radian threshold
-            twist_msg.angular.z = std::copysign(angular_speed, angle_to_marker);
+            twist_msg.angular.z = std::copysign(angular_vel, angle_to_marker);
             
-            // Reduce linear speed when turning
-            twist_msg.linear.x = linear_speed * 0.3;
+            // No linear speed when turning
+            twist_msg.linear.x = 0.0;
         } else {
             // Move forward when aligned
             twist_msg.angular.z = 0.0;
             
-            // Reduce speed as we get closer
-            double speed_factor = std::min(1.0, (distance - min_distance) / 1.0);
-            speed_factor = std::max(0.1, speed_factor); // Minimum speed factor
-            
-            twist_msg.linear.x = linear_speed * speed_factor;
+            // use minimum linear vel 0.5 m from the minimum distance
+            if (distance_to_marker < min_distance + 0.5) {
+                twist_msg.linear.x = std::min(min_linear_vel, linear_vel);
+            } else {
+                twist_msg.linear.x = linear_vel;
+            }                     
         }
         
+        // Update current velocities
+        curr_linear_vel  = twist_msg.linear.x;
+        curr_angular_vel = twist_msg.angular.z;
+        // Publish the velocity command
         cmd_vel_publisher->publish(twist_msg);
         
         RCLCPP_DEBUG(this->get_logger(), 
             "Moving: linear=%.2f, angular=%.2f, distance=%.2f, angle=%.2f",
-            twist_msg.linear.x, twist_msg.angular.z, distance, angle_to_marker);
+            twist_msg.linear.x, twist_msg.angular.z, distance_to_marker, angle_to_marker);
     }
 
     void stop_robot()

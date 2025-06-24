@@ -1,5 +1,8 @@
 # Request 
 int64 marker_id
+float32 min_distance
+float32 linear_vel
+float32 angular_vel
 ---
 # Response
 string message
@@ -7,3 +10,5 @@ bool success
 ---
 # Feedback
 float32 distance_to_marker
+float32 curr_linear_vel
+float32 curr_angular_vel
