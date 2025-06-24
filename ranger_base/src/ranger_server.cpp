@@ -7,6 +7,7 @@
 // [ ] Parking Mode Service Implementation
 // [ ] Search For Marker Action Implementation
 // [ ] Integrate diagnostics and status publishing
+// [ ] Check /aruco_markers topic test since it will exist with the topic being subscribed to (check publisher node instead of topic)
 // [ ] Update documentation 
 
 #include <memory>
@@ -35,8 +36,8 @@ public:
 
     RangerServer()
     : Node("ranger_server"),
-      target_marker_id(-1),
-      action_active(false),
+      follow_marker_id(-1),
+      follow_active(false),
       marker_detected(false),
       min_distance(0.75),
       linear_vel(0.5),
@@ -49,16 +50,16 @@ public:
         RCLCPP_INFO(this->get_logger(), "RangerServer node has been started.");
 
         // Create action server
-        this->action_server = rclcpp_action::create_server<ArucoFollow>(
+        this->follow_action_server = rclcpp_action::create_server<ArucoFollow>(
             this,
             "follow_aruco",
             std::bind(&RangerServer::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&RangerServer::handle_cancel, this, std::placeholders::_1),
             std::bind(&RangerServer::handle_accepted, this, std::placeholders::_1));
 
-        // Initialize action result and feedback
-        result   = std::make_shared<ArucoFollow::Result>();
-        feedback = std::make_shared<ArucoFollow::Feedback>();
+        // Initialize action follow_result and follow_feedback
+        follow_result   = std::make_shared<ArucoFollow::Result>();
+        follow_feedback = std::make_shared<ArucoFollow::Feedback>();
         
         // Create subscribers and publishers
         aruco_subscriber = this->create_subscription<ros2_aruco_interfaces::msg::ArucoMarkers>(
@@ -76,7 +77,7 @@ public:
 
 private:
     // Action server
-    rclcpp_action::Server<ArucoFollow>::SharedPtr action_server;
+    rclcpp_action::Server<ArucoFollow>::SharedPtr follow_action_server;
     
     // Publishers and subscribers
     rclcpp::Subscription<ros2_aruco_interfaces::msg::ArucoMarkers>::SharedPtr aruco_subscriber;
@@ -86,17 +87,17 @@ private:
     rclcpp::TimerBase::SharedPtr control_timer;
     
     // Action Result
-    std::shared_ptr<ArucoFollow::Result> result;
+    std::shared_ptr<ArucoFollow::Result> follow_result;
 
     // Action Feedback 
-    std::shared_ptr<ArucoFollow::Feedback> feedback;
+    std::shared_ptr<ArucoFollow::Feedback> follow_feedback;
     
     // Current goal handle
     std::shared_ptr<GoalHandleArucoFollow> current_goal_handle;
     
     // State variables
-    int64_t target_marker_id;
-    bool action_active;
+    int64_t follow_marker_id;
+    bool follow_active;
     geometry_msgs::msg::Pose current_marker_pose;
     bool marker_detected;
     rclcpp::Time last_marker_time;
@@ -121,7 +122,7 @@ private:
         RCLCPP_INFO(this->get_logger(), "Received goal request to follow marker ID: %ld", goal->marker_id);
         
         // Check if another action is already running
-        if (action_active) {
+        if (follow_active) {
             RCLCPP_WARN(this->get_logger(), "Another follow action is already active. Rejecting new goal.");
             return rclcpp_action::GoalResponse::REJECT;
         }
@@ -137,7 +138,7 @@ private:
         
         // Stop the robot
         stop_robot();
-        action_active = false;
+        follow_active = false;
         
         return rclcpp_action::CancelResponse::ACCEPT;
     }
@@ -147,7 +148,7 @@ private:
         // Get goal request parameters
         auto goal = goal_handle->get_goal();
         // Mandatory request parameters
-        target_marker_id = goal->marker_id;
+        follow_marker_id = goal->marker_id;
         min_distance     = goal->min_distance;
         // Optional parameters with defaults
         linear_vel  = (goal->linear_vel > 0.0) ? goal->linear_vel : linear_vel;
@@ -158,7 +159,7 @@ private:
         std::string missing_fields;
 
         // Check if marker_id is specified
-        if (target_marker_id <= 0) {
+        if (follow_marker_id <= 0) {
             valid = false;
             missing_fields += "marker_id ";
         }
@@ -170,23 +171,23 @@ private:
 
         if (valid) {
             current_goal_handle = goal_handle;
-            action_active       = true;
+            follow_active       = true;
             marker_detected     = false;
 
             RCLCPP_INFO(this->get_logger(), 
                 "Starting to follow marker ID: %ld | min_distance: %.2f | linear_vel: %.2f | angular_vel: %.2f",
-                target_marker_id, min_distance, linear_vel, angular_vel);
+                follow_marker_id, min_distance, linear_vel, angular_vel);
 
             // Check if aruco_markers topic is available
             check_aruco_topic_availability();
         } else {
-            action_active = false;
+            follow_active = false;
             RCLCPP_WARN(this->get_logger(),
                 "Action request missing required field(s) or incorrect values: %s. Please specify them in the action request.",
                 missing_fields.c_str());
-            result->success = false;
-            result->message = "Action request failed due to missing or invalid parameters: " + missing_fields;
-            goal_handle->abort(result);
+            follow_result->success = false;
+            follow_result->message = "Action request failed due to missing or invalid parameters: " + missing_fields;
+            goal_handle->abort(follow_result);
             return;
         }
     }
@@ -213,18 +214,18 @@ private:
 
     void aruco_callback(const ros2_aruco_interfaces::msg::ArucoMarkers::SharedPtr msg)
     {
-        if (!action_active) return;
+        if (!follow_active) return;
         
         // Look for the target marker in the message
         for (size_t i = 0; i < msg->marker_ids.size(); ++i) {
-            if (msg->marker_ids[i] == target_marker_id) {
+            if (msg->marker_ids[i] == follow_marker_id) {
                 current_marker_pose = msg->poses[i];
                 marker_detected = true;
                 last_marker_time = this->get_clock()->now();
                 
                 RCLCPP_DEBUG(this->get_logger(), 
                     "Detected target marker %ld at position (%.2f, %.2f, %.2f)", 
-                    target_marker_id,
+                    follow_marker_id,
                     current_marker_pose.position.x,
                     current_marker_pose.position.y,
                     current_marker_pose.position.z);
@@ -235,7 +236,7 @@ private:
 
     void control_loop()
     {
-        if (!action_active || !current_goal_handle) return;
+        if (!follow_active || !current_goal_handle) return;
         
         // Check if marker was detected recently (within 2 seconds)
         if (!marker_detected || 
@@ -243,7 +244,7 @@ private:
             
             if (marker_detected) {
                 RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-                    "Marker %ld not detected recently. Stopping robot.", target_marker_id);
+                    "Marker %ld not detected recently. Stopping robot.", follow_marker_id);
             }
             
             stop_robot();
@@ -253,25 +254,25 @@ private:
         // Calculate distance to marker 
         distance_to_marker = calculate_distance_to_marker();
         
-        // Send feedback
-        feedback->distance_to_marker = std::round(distance_to_marker * 1000.0f) / 1000.0f;
-        feedback->curr_linear_vel    = std::round(curr_linear_vel * 1000.0f) / 1000.0f;
-        feedback->curr_angular_vel   = std::round(curr_angular_vel * 1000.0f) / 1000.0f;
-        current_goal_handle->publish_feedback(feedback);
+        // Send follow_feedback
+        follow_feedback->distance_to_marker = std::round(distance_to_marker * 1000.0f) / 1000.0f;
+        follow_feedback->curr_linear_vel    = std::round(curr_linear_vel * 1000.0f) / 1000.0f;
+        follow_feedback->curr_angular_vel   = std::round(curr_angular_vel * 1000.0f) / 1000.0f;
+        current_goal_handle->publish_feedback(follow_feedback);
         
         // Check if we've reached the minimum distance
         if (distance_to_marker <= min_distance) {
             RCLCPP_INFO(this->get_logger(), 
-                "Reached minimum distance (%.2f m) to marker %ld", min_distance, target_marker_id);
+                "Reached minimum distance (%.2f m) to marker %ld", min_distance, follow_marker_id);
             
             stop_robot();
             
-            // Send success result
-            result->message = "Successfully reached marker " + std::to_string(target_marker_id);
-            result->success = true;
+            // Send success follow_result
+            follow_result->message = "Successfully reached marker " + std::to_string(follow_marker_id);
+            follow_result->success = true;
             
-            current_goal_handle->succeed(result);
-            action_active = false;
+            current_goal_handle->succeed(follow_result);
+            follow_active = false;
             return;
         }
         
