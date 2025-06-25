@@ -3,11 +3,9 @@
 // Date: 22-6-2025
 // Description: ROS 2 node for ranger_base package to be server of ros2 services and actions for Ranger mobile base
 // TODO LIST:
-// [✓] Search For Marker Action Implementation
 // [ ] Use /odom topic with real hardware to get the rotation-angle
 // [ ] Use ROS2 Parameters for default values and dynamic reconfiguration
 // [ ] Parking Mode Service Implementation
-// [ ] Check /aruco_markers topic test since it will exist with the topic being subscribed to (check publisher node instead of topic)
 // [ ] Update documentation 
 
 #include <memory>
@@ -203,15 +201,19 @@ private:
 
         if (valid) {
             current_follow_goal_handle = goal_handle;
-            follow_active       = true;
-            marker_detected     = false;
-
-            RCLCPP_INFO(this->get_logger(), 
-                "Starting to follow marker ID: %ld | min_distance: %.2f | linear_vel: %.2f | angular_vel: %.2f",
-                follow_marker_id, min_distance, linear_vel, angular_vel);
-
-            // Check if aruco_markers topic is available
-            check_aruco_topic_availability();
+            if(check_aruco_topic_availability()){
+                follow_active   = true;
+                marker_detected = false;
+                RCLCPP_INFO(this->get_logger(), 
+                    "Starting to follow marker ID: %ld | min_distance: %.2f | linear_vel: %.2f | angular_vel: %.2f",
+                    follow_marker_id, min_distance, linear_vel, angular_vel);
+            } else {
+                follow_active = false;
+                follow_result->success = false;
+                follow_result->message = "ERR: No publisher for /aruco_markers topic. Please check the aruco recognition node first.";
+                goal_handle->abort(follow_result);
+                return;
+            }
         } else {
             follow_active = false;
             RCLCPP_WARN(this->get_logger(),
@@ -280,16 +282,22 @@ private:
 
         if(valid) {
             current_search_goal_handle = goal_handle;
-            search_active        = true;
-            marker_detected      = false;
-            total_rotation_angle = 0.0;
-            last_rotation_time   = this->get_clock()->now();
-
-            RCLCPP_INFO(this->get_logger(), 
-                "Starting to search for marker ID: %ld | direction: %s",
-                search_marker_id, (search_direction == 1) ? "counter-clockwise" : "clockwise");
+            if(check_aruco_topic_availability()){
+                search_active        = true;
+                marker_detected      = false;
+                total_rotation_angle = 0.0;
+                last_rotation_time   = this->get_clock()->now();
+                RCLCPP_INFO(this->get_logger(), 
+                    "Starting to search for marker ID: %ld | direction: %s",
+                    search_marker_id, (search_direction == 1) ? "counter-clockwise" : "clockwise");
+            } else {
+                search_active = false;
+                search_result->success = false;
+                search_result->message = "ERR: No publisher for /aruco_markers topic. Please check the aruco recognition node first.";
+                goal_handle->abort(search_result);
+                return;
+            }
             
-            check_aruco_topic_availability();
         } else {
             search_active = false;
             RCLCPP_WARN(this->get_logger(),
@@ -302,23 +310,25 @@ private:
         }
     }
 
-    void check_aruco_topic_availability()
+    bool check_aruco_topic_availability()
     {
-        auto topic_names_and_types = this->get_topic_names_and_types();
-        bool topic_found = false;
+        // Get publisher count for the topic
+        auto publishers_info = this->get_publishers_info_by_topic("/aruco_markers");
         
-        for (const auto& topic : topic_names_and_types) {
-            if (topic.first == "/aruco_markers") {
-                topic_found = true;
-                break;
-            }
-        }
-        
-        if (!topic_found) {
+        if (publishers_info.empty()) {
             RCLCPP_WARN(this->get_logger(), 
-                "Warning: /aruco_markers topic is not available. Make sure the ArUco detection node is running.");
+                "Warning: No publishers found for /aruco_markers topic. Make sure the Aruco recognition node is running.");
+            return false;
         } else {
-            RCLCPP_INFO(this->get_logger(), "/aruco_markers topic is available.");
+            RCLCPP_INFO(this->get_logger(), 
+                "Found %zu publisher(s) for /aruco_markers topic.", publishers_info.size());
+            
+            // Optionally, you can check the publisher node names
+            for (const auto& pub_info : publishers_info) {
+                RCLCPP_INFO(this->get_logger(), 
+                    "Publisher node: %s", pub_info.node_name().c_str());
+            }
+            return true;
         }
     }
 
