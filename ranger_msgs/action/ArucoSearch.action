@@ -1,0 +1,13 @@
+# Request
+int64 marker_id # Mandatory
+int64 direction # Optional
+                #  1 for counter-clockwise (Default)
+                # -1 for clockwise
+---
+# Response
+string message
+bool success
+---
+# Feedback
+float32 rotation_angle 
+float32 curr_angular_vel 

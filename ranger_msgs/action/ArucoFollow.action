@@ -1,8 +1,8 @@
 # Request 
-int64 marker_id
-float32 min_distance
-float32 linear_vel
-float32 angular_vel
+int64 marker_id      # Mandatory
+float32 min_distance # Mandatory
+float32 linear_vel   # Optional: Default is 0.5 m/s
+float32 angular_vel  # Optional: Default is 0.5 rad/s
 ---
 # Response
 string message
