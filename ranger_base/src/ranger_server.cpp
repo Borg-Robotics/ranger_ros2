@@ -5,8 +5,6 @@
 // TODO LIST:
 // [ ] Use /odom topic with real hardware to get the rotation-angle
 // [ ] Use ROS2 Parameters for default values and dynamic reconfiguration
-// [ ] Parking Mode Service Implementation
-// [ ] Update documentation 
 
 #include <memory>
 #include <chrono>
