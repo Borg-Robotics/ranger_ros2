@@ -2,9 +2,7 @@
 // Author: Ziad Ammar
 // Date: 22-6-2025
 // Description: ROS 2 node for ranger_base package to be server of ros2 services and actions for Ranger mobile base
-// TODO LIST:
-// [ ] Use /odom topic with real hardware to get the rotation-angle
-// [ ] Use ROS2 Parameters for default values and dynamic reconfiguration
+
 
 #include <memory>
 #include <chrono>
@@ -45,8 +43,7 @@ public:
       // Search Action Variables
       search_marker_id(-1),
       search_active(false),
-      total_rotation_angle(0.0),
-      last_rotation_time(this->get_clock()->now()),
+      search_start_time(this->get_clock()->now()),
       // Helper Variables
       marker_detected(false),
       distance_to_marker(-1.0),
@@ -55,6 +52,9 @@ public:
       min_linear_vel(0.35)
     {
         RCLCPP_INFO(this->get_logger(), "RangerServer node has been started.");
+
+        // Declare ROS2 parameter for search timeout
+        this->declare_parameter("search_timeout", 60.0);
 
         // Create action servers
         this->follow_action_server = rclcpp_action::create_server<ArucoFollow>(
@@ -126,8 +126,8 @@ private:
     int64_t search_marker_id;
     bool search_active;
     int64_t search_direction; 
-    float total_rotation_angle;
-    rclcpp::Time last_rotation_time;
+    float search_angular_vel;
+    rclcpp::Time search_start_time;
 
     // Marker state
     bool marker_detected;
@@ -250,7 +250,6 @@ private:
         // Stop the robot
         stop_robot();
         search_active = false;
-        total_rotation_angle = 0.0;
 
         return rclcpp_action::CancelResponse::ACCEPT;
     }
@@ -260,6 +259,7 @@ private:
         // Get goal request parameters
         auto goal = goal_handle->get_goal();
         search_marker_id = goal->marker_id;
+        search_angular_vel = goal->angular_vel;
         search_direction = (goal->direction != 0) ? goal->direction : 1; // Default to counter-clockwise
 
         // Check validity of goal parameters
@@ -272,6 +272,12 @@ private:
             missing_fields += "marker_id ";
         }
 
+        // Check if angular_vel is specified and valid
+        if(search_angular_vel <= 0.0) {
+            valid = false;
+            missing_fields += "angular_vel ";
+        }
+
         // Validate search direction
         if (search_direction != 1 && search_direction != -1) {
             search_direction = 1; // Default to counter-clockwise
@@ -281,13 +287,12 @@ private:
         if(valid) {
             current_search_goal_handle = goal_handle;
             if(check_aruco_topic_availability()){
-                search_active        = true;
-                marker_detected      = false;
-                total_rotation_angle = 0.0;
-                last_rotation_time   = this->get_clock()->now();
+                search_active      = true;
+                marker_detected    = false;
+                search_start_time  = this->get_clock()->now();
                 RCLCPP_INFO(this->get_logger(), 
-                    "Starting to search for marker ID: %ld | direction: %s",
-                    search_marker_id, (search_direction == 1) ? "counter-clockwise" : "clockwise");
+                    "Starting to search for marker ID: %ld | angular_vel: %.2f | direction: %s",
+                    search_marker_id, search_angular_vel, (search_direction == 1) ? "counter-clockwise" : "clockwise");
             } else {
                 search_active = false;
                 search_result->success = false;
@@ -427,31 +432,28 @@ private:
 
     void control_search_action()
     { 
-        // TODO: Use /odom to get the correct rotation angle instead. 
-
-        // Calculate rotation since last update
+        // Get search timeout parameter
+        double search_timeout = this->get_parameter("search_timeout").as_double();
+        
+        // Calculate elapsed time since search started
         auto current_time = this->get_clock()->now();
-        double dt = (current_time - last_rotation_time).seconds();
+        double elapsed_time = (current_time - search_start_time).seconds();
         
-        // Add to total rotation (convert to degrees)
-        total_rotation_angle += (std::abs(angular_vel * search_direction) * dt * 180.0 / M_PI) * 0.325; // Factor for simulation
-        last_rotation_time = current_time;
-        
-        // Send search feedback
-        search_feedback->rotation_angle = std::round(total_rotation_angle * 100.0f) / 100.0f;
-        search_feedback->curr_angular_vel = std::round(angular_vel * search_direction * 1000.0f) / 1000.0f;
+        // Send search feedback with elapsed time
+        search_feedback->elapsed_time = elapsed_time;  // This field now represents elapsed time in seconds
+        search_feedback->curr_angular_vel = std::round(search_angular_vel * search_direction * 1000.0f) / 1000.0f;
         current_search_goal_handle->publish_feedback(search_feedback);
         
-        // Check if we've completed a full rotation (360 degrees)
-        if (total_rotation_angle >= 360.0) {
+        // Check if we've exceeded the timeout
+        if (elapsed_time >= search_timeout) {
             RCLCPP_INFO(this->get_logger(), 
-                "Completed full rotation (%.1f degrees) without finding marker %ld", 
-                total_rotation_angle, search_marker_id);
+                "Search timeout (%.1f seconds) reached without finding marker %ld", 
+                search_timeout, search_marker_id);
             
             stop_robot();
             
             search_result->success = false;
-            search_result->message = "Marker " + std::to_string(search_marker_id) + " not found after full rotation";
+            search_result->message = "Marker " + std::to_string(search_marker_id) + " not found within timeout period";
             
             current_search_goal_handle->succeed(search_result);
             search_active = false;
@@ -514,8 +516,8 @@ private:
     {
         auto twist_msg = geometry_msgs::msg::Twist();
         
-        // Set angular velocity based on direction
-        twist_msg.angular.z = angular_vel * search_direction;
+        // Set angular velocity based on direction using search_angular_vel
+        twist_msg.angular.z = search_angular_vel * search_direction;
         
         // No linear movement during search
         twist_msg.linear.x = 0.0;
@@ -527,8 +529,8 @@ private:
         cmd_vel_publisher->publish(twist_msg);
         
         RCLCPP_DEBUG(this->get_logger(), 
-            "Searching: angular=%.2f, total_rotation=%.1f degrees",
-            twist_msg.angular.z, total_rotation_angle);
+            "Searching: angular=%.2f, elapsed_time=%.1f seconds",
+            twist_msg.angular.z, (this->get_clock()->now() - search_start_time).seconds());
     }
 
     void stop_robot()
