@@ -1,0 +1,22 @@
+# ROS2 Parameters for ranger_base_node
+# This file contains all configurable parameters for the ranger_base_node
+# which handles the low-level robot communication and state publishing
+
+/**:
+  ros__parameters:
+    # Hardware Communication Parameters
+    port_name: "can0"                    # CAN port name for robot communication
+    robot_model: "ranger_mini_v2"        # Robot model (ranger_mini_v1, ranger_mini_v2, ranger)
+    
+    # Control and Update Parameters
+    update_rate: 50                      # Update rate in Hz for state publishing
+    
+    # Frame Configuration
+    odom_frame: "odom"                   # Odometry frame name
+    base_frame: "robot_footprint"        # Base frame name (robot_footprint, base_link)
+    
+    # Topic Configuration
+    odom_topic_name: "odom"              # Odometry topic name
+    
+    # Transform Publishing
+    publish_odom_tf: true                # Whether to publish odometry transform
