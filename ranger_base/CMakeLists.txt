@@ -56,6 +56,10 @@ install(TARGETS ranger_server
 install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}/)
 
+# config files
+install(DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}/)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights

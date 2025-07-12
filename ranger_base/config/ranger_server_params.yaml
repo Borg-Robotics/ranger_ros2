@@ -1,0 +1,47 @@
+# ROS2 Parameters for Ranger Server Node
+# Author: Ziad Ammar
+# Date: 12-7-2025
+# Description: Configuration parameters for ranger_server action servers
+
+ranger_server:
+  ros__parameters:
+    # Action Server Parameters
+    follow_action:
+      # Default velocity parameters
+      default_linear_vel: 0.25    # m/s - Default linear velocity for follow action
+      default_angular_vel: 0.15   # rad/s - Default angular velocity for follow action
+      default_min_distance: 1.0   # m - Default minimum distance to marker
+      min_linear_vel: 0.15        # m/s - Minimum linear velocity when approaching target
+      
+      # Maximum velocity limits (safety parameters)
+      max_linear_vel: 0.5         # m/s - Maximum allowed linear velocity
+      max_angular_vel: 0.3        # rad/s - Maximum allowed angular velocity
+      
+      # Control parameters
+      angular_threshold: 0.01     # rad - Angular threshold for alignment
+      marker_timeout: 2.0         # s - Timeout for marker detection loss
+      
+    search_action:
+      # Default velocity parameters
+      default_angular_vel: 0.2    # rad/s - Default angular velocity for search action
+      default_direction: 1        # 1 for counter-clockwise, -1 for clockwise
+      
+      # Maximum velocity limits (safety parameters)
+      max_angular_vel: 0.3        # rad/s - Maximum allowed angular velocity for search
+      
+      # Timeout parameters
+      search_timeout: 60.0        # s - Maximum time to search for marker
+      
+    # Topic and frame parameters
+    topics:
+      aruco_markers: "/aruco_markers"  # ArUco markers topic
+      cmd_vel: "/cmd_vel"              # Velocity command topic
+      
+    # Control loop parameters
+    control:
+      loop_rate: 10.0             # Hz - Control loop frequency (100ms = 10Hz)
+      
+    # Logging parameters
+    logging:
+      debug_enabled: false        # Enable debug logging
+      throttle_duration: 2000     # ms - Duration for throttled warnings

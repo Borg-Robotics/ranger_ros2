@@ -53,8 +53,8 @@ public:
     {
         RCLCPP_INFO(this->get_logger(), "RangerServer node has been started.");
 
-        // Declare ROS2 parameter for search timeout
-        this->declare_parameter("search_timeout", 60.0);
+        // Initialize ROS2 parameters
+        initialize_parameters();
 
         // Create action servers
         this->follow_action_server = rclcpp_action::create_server<ArucoFollow>(
@@ -77,16 +77,21 @@ public:
         search_result   = std::make_shared<ArucoSearch::Result>();
         search_feedback = std::make_shared<ArucoSearch::Feedback>();
 
-        // Create subscribers and publishers
+        // Create subscribers and publishers using parameters
+        std::string aruco_topic   = this->get_parameter("topics.aruco_markers").as_string();
+        std::string cmd_vel_topic = this->get_parameter("topics.cmd_vel").as_string();
+        
         aruco_subscriber = this->create_subscription<ros2_aruco_interfaces::msg::ArucoMarkers>(
-            "/aruco_markers", 10,
+            aruco_topic, 10,
             std::bind(&RangerServer::aruco_callback, this, std::placeholders::_1));
 
-        cmd_vel_publisher = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+        cmd_vel_publisher = this->create_publisher<geometry_msgs::msg::Twist>(cmd_vel_topic, 10);
 
-        // Timer for control loop
+        // Timer for control loop using parameter
+        double loop_rate = this->get_parameter("control.loop_rate").as_double();
+        auto loop_period = std::chrono::milliseconds(static_cast<int>(1000.0 / loop_rate));
         control_timer = this->create_wall_timer(
-            100ms, std::bind(&RangerServer::control_loop, this));
+            loop_period, std::bind(&RangerServer::control_loop, this));
 
         RCLCPP_INFO(this->get_logger(), "Action server '/follow_aruco' is ready.");
         RCLCPP_INFO(this->get_logger(), "Action server '/search_aruco' is ready.");
@@ -140,6 +145,129 @@ private:
     float curr_angular_vel;
     // Default minimum linear velocity 
     float min_linear_vel;
+    
+    // Maximum velocity limits (safety parameters)
+    double max_linear_vel_follow;
+    double max_angular_vel_follow;
+    double max_angular_vel_search;
+    
+    // Parameter values
+    double default_linear_vel;
+    double default_angular_vel;
+    double default_min_distance;
+    double angular_threshold;
+    double marker_timeout;
+    double search_timeout;
+    double default_search_angular_vel;
+    int default_search_direction;
+    bool debug_enabled;
+    int throttle_duration;
+
+    // Parameter initialization method
+    void initialize_parameters()
+    {
+        // Follow action parameters
+        this->declare_parameter("follow_action.default_linear_vel", 0.5);
+        this->declare_parameter("follow_action.default_angular_vel", 0.75);
+        this->declare_parameter("follow_action.default_min_distance", 0.75);
+        this->declare_parameter("follow_action.min_linear_vel", 0.35);
+        this->declare_parameter("follow_action.max_linear_vel", 1.5);
+        this->declare_parameter("follow_action.max_angular_vel", 2.0);
+        this->declare_parameter("follow_action.angular_threshold", 0.1);
+        this->declare_parameter("follow_action.marker_timeout", 2.0);
+        
+        // Search action parameters
+        this->declare_parameter("search_action.default_angular_vel", 0.75);
+        this->declare_parameter("search_action.default_direction", 1);
+        this->declare_parameter("search_action.max_angular_vel", 2.0);
+        this->declare_parameter("search_action.search_timeout", 60.0);
+        
+        // Topic parameters
+        this->declare_parameter("topics.aruco_markers", "/aruco_markers");
+        this->declare_parameter("topics.cmd_vel", "/cmd_vel");
+        
+        // Control parameters
+        this->declare_parameter("control.loop_rate", 10.0);
+        
+        // Logging parameters
+        this->declare_parameter("logging.debug_enabled", false);
+        this->declare_parameter("logging.throttle_duration", 2000);
+        
+        // Load parameters
+        load_parameters();
+        
+        RCLCPP_INFO(this->get_logger(), "Parameters initialized successfully");
+        log_parameter_summary();
+    }
+    
+    void load_parameters()
+    {
+        // Follow action parameters
+        default_linear_vel      = this->get_parameter("follow_action.default_linear_vel").as_double();
+        default_angular_vel     = this->get_parameter("follow_action.default_angular_vel").as_double();
+        default_min_distance    = this->get_parameter("follow_action.default_min_distance").as_double();
+        min_linear_vel          = this->get_parameter("follow_action.min_linear_vel").as_double();
+        max_linear_vel_follow   = this->get_parameter("follow_action.max_linear_vel").as_double();
+        max_angular_vel_follow  = this->get_parameter("follow_action.max_angular_vel").as_double();
+        angular_threshold       = this->get_parameter("follow_action.angular_threshold").as_double();
+        marker_timeout          = this->get_parameter("follow_action.marker_timeout").as_double();
+        
+        // Search action parameters
+        default_search_angular_vel = this->get_parameter("search_action.default_angular_vel").as_double();
+        default_search_direction   = this->get_parameter("search_action.default_direction").as_int();
+        max_angular_vel_search     = this->get_parameter("search_action.max_angular_vel").as_double();
+        search_timeout             = this->get_parameter("search_action.search_timeout").as_double();
+        
+        // Logging parameters
+        debug_enabled     = this->get_parameter("logging.debug_enabled").as_bool();
+        throttle_duration = this->get_parameter("logging.throttle_duration").as_int();
+        
+        // Initialize default values
+        linear_vel   = default_linear_vel;
+        angular_vel  = default_angular_vel;
+        min_distance = default_min_distance;
+    }
+    
+    void log_parameter_summary()
+    {
+        RCLCPP_INFO(this->get_logger(), "=== Ranger Server Parameter Summary ===");
+        RCLCPP_INFO(this->get_logger(), "Follow Action:");
+        RCLCPP_INFO(this->get_logger(), "  Default linear vel: %.2f m/s (max: %.2f m/s)", 
+                   default_linear_vel, max_linear_vel_follow);
+        RCLCPP_INFO(this->get_logger(), "  Default angular vel: %.2f rad/s (max: %.2f rad/s)", 
+                   default_angular_vel, max_angular_vel_follow);
+        RCLCPP_INFO(this->get_logger(), "  Default min distance: %.2f m", default_min_distance);
+        RCLCPP_INFO(this->get_logger(), "Search Action:");
+        RCLCPP_INFO(this->get_logger(), "  Default angular vel: %.2f rad/s (max: %.2f rad/s)", 
+                   default_search_angular_vel, max_angular_vel_search);
+        RCLCPP_INFO(this->get_logger(), "  Search timeout: %.1f s", search_timeout);
+        RCLCPP_INFO(this->get_logger(), "=========================================");
+    }
+    
+    // Safety function to enforce velocity limits
+    double enforce_linear_velocity_limit(double requested_vel, const std::string& action_name)
+    {
+        if (requested_vel > max_linear_vel_follow) {
+            RCLCPP_WARN(this->get_logger(), 
+                       "[%s] Requested linear velocity %.2f m/s exceeds maximum limit %.2f m/s. Using maximum value.",
+                       action_name.c_str(), requested_vel, max_linear_vel_follow);
+            return max_linear_vel_follow;
+        }
+        return requested_vel;
+    }
+    
+    double enforce_angular_velocity_limit(double requested_vel, const std::string& action_name, bool is_search = false)
+    {
+        double max_limit = is_search ? max_angular_vel_search : max_angular_vel_follow;
+        
+        if (std::abs(requested_vel) > max_limit) {
+            RCLCPP_WARN(this->get_logger(), 
+                       "[%s] Requested angular velocity %.2f rad/s exceeds maximum limit %.2f rad/s. Using maximum value.",
+                       action_name.c_str(), std::abs(requested_vel), max_limit);
+            return std::copysign(max_limit, requested_vel);
+        }
+        return requested_vel;
+    }
 
     //  FOLLOW ACTION HANDLERS
     rclcpp_action::GoalResponse handle_follow_goal(
@@ -178,9 +306,14 @@ private:
         // Mandatory request parameters
         follow_marker_id = goal->marker_id;
         min_distance     = goal->min_distance;
-        // Optional parameters with defaults
-        linear_vel  = (goal->linear_vel > 0.0) ? goal->linear_vel : linear_vel;
-        angular_vel = (goal->angular_vel > 0.0) ? goal->angular_vel : angular_vel;
+        
+        // Optional parameters with defaults and safety limits
+        double requested_linear_vel  = (goal->linear_vel > 0.0) ? goal->linear_vel : default_linear_vel;
+        double requested_angular_vel = (goal->angular_vel > 0.0) ? goal->angular_vel : default_angular_vel;
+        
+        // Enforce velocity limits with safety warnings
+        linear_vel  = enforce_linear_velocity_limit(requested_linear_vel, "follow_aruco");
+        angular_vel = enforce_angular_velocity_limit(requested_angular_vel, "follow_aruco", false);
         
         // Check validity of goal parameters
         bool valid = true;
@@ -259,8 +392,12 @@ private:
         // Get goal request parameters
         auto goal = goal_handle->get_goal();
         search_marker_id = goal->marker_id;
-        search_angular_vel = goal->angular_vel;
-        search_direction = (goal->direction != 0) ? goal->direction : 1; // Default to counter-clockwise
+        
+        // Optional parameters with defaults and safety limits
+        double requested_angular_vel = (goal->angular_vel > 0.0) ? goal->angular_vel : default_search_angular_vel;
+        search_angular_vel = enforce_angular_velocity_limit(requested_angular_vel, "search_aruco", true);
+        
+        search_direction = (goal->direction != 0) ? goal->direction : default_search_direction;
 
         // Check validity of goal parameters
         bool valid = true;
@@ -272,16 +409,10 @@ private:
             missing_fields += "marker_id ";
         }
 
-        // Check if angular_vel is specified and valid
-        if(search_angular_vel <= 0.0) {
-            valid = false;
-            missing_fields += "angular_vel ";
-        }
-
         // Validate search direction
         if (search_direction != 1 && search_direction != -1) {
-            search_direction = 1; // Default to counter-clockwise
-            RCLCPP_WARN(this->get_logger(), "Invalid direction specified, must use [-1 || 1] ,using default (counter-clockwise)");
+            search_direction = default_search_direction;
+            RCLCPP_WARN(this->get_logger(), "Invalid direction specified, must use [-1 || 1] ,using default value: %s", default_search_direction ? "counter-clockwise" : "clockwise");
         }
 
         if(valid) {
@@ -388,12 +519,12 @@ private:
     {
         if (!follow_active || !current_follow_goal_handle) return;
         
-        // Check if marker was detected recently (within 2 seconds)
+        // Check if marker was detected recently using parameter-based timeout
         if (!marker_detected || 
-            (this->get_clock()->now() - last_marker_time).seconds() > 2.0) {
+            (this->get_clock()->now() - last_marker_time).seconds() > marker_timeout) {
             
             if (marker_detected) {
-                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), throttle_duration,
                     "Marker %ld not detected recently. Stopping robot.", follow_marker_id);
             }
             
@@ -432,9 +563,6 @@ private:
 
     void control_search_action()
     { 
-        // Get search timeout parameter
-        double search_timeout = this->get_parameter("search_timeout").as_double();
-        
         // Calculate elapsed time since search started
         auto current_time = this->get_clock()->now();
         double elapsed_time = (current_time - search_start_time).seconds();
@@ -444,7 +572,7 @@ private:
         search_feedback->curr_angular_vel = std::round(search_angular_vel * search_direction * 1000.0f) / 1000.0f;
         current_search_goal_handle->publish_feedback(search_feedback);
         
-        // Check if we've exceeded the timeout
+        // Check if we've exceeded the timeout using parameter value
         if (elapsed_time >= search_timeout) {
             RCLCPP_INFO(this->get_logger(), 
                 "Search timeout (%.1f seconds) reached without finding marker %ld", 
@@ -483,8 +611,8 @@ private:
             current_marker_pose.position.x
         );
         
-        // Angular velocity (turn towards marker)
-        if (std::abs(angle_to_marker) > 0.1) { // 0.1 radian threshold
+        // Angular velocity (turn towards marker) using parameter-based threshold
+        if (std::abs(angle_to_marker) > angular_threshold) {
             twist_msg.angular.z = std::copysign(angular_vel, angle_to_marker);
             
             // No linear speed when turning
@@ -507,9 +635,11 @@ private:
         // Publish the velocity command
         cmd_vel_publisher->publish(twist_msg);
         
-        RCLCPP_DEBUG(this->get_logger(), 
-            "Moving: linear=%.2f, angular=%.2f, distance=%.2f, angle=%.2f",
-            twist_msg.linear.x, twist_msg.angular.z, distance_to_marker, angle_to_marker);
+        if (debug_enabled) {
+            RCLCPP_DEBUG(this->get_logger(), 
+                "Moving: linear=%.2f, angular=%.2f, distance=%.2f, angle=%.2f",
+                twist_msg.linear.x, twist_msg.angular.z, distance_to_marker, angle_to_marker);
+        }
     }
 
     void rotate_robot()
@@ -528,9 +658,11 @@ private:
         
         cmd_vel_publisher->publish(twist_msg);
         
-        RCLCPP_DEBUG(this->get_logger(), 
-            "Searching: angular=%.2f, elapsed_time=%.1f seconds",
-            twist_msg.angular.z, (this->get_clock()->now() - search_start_time).seconds());
+        if (debug_enabled) {
+            RCLCPP_DEBUG(this->get_logger(), 
+                "Searching: angular=%.2f, elapsed_time=%.1f seconds",
+                twist_msg.angular.z, (this->get_clock()->now() - search_start_time).seconds());
+        }
     }
 
     void stop_robot()
