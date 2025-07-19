@@ -10,17 +10,25 @@ ranger_server:
       # Default velocity parameters
       default_linear_vel: 0.25    # m/s - Default linear velocity for follow action
       default_angular_vel: 0.15   # rad/s - Default angular velocity for follow action
-      default_min_distance: 1.0   # m - Default minimum distance to marker
-      min_linear_vel: 0.15        # m/s - Minimum linear velocity when approaching target
       
       # Maximum velocity limits (safety parameters)
-      max_linear_vel: 0.5         # m/s - Maximum allowed linear velocity
+      max_linear_vel: 1.0         # m/s - Maximum allowed linear velocity
       max_angular_vel: 0.3        # rad/s - Maximum allowed angular velocity
       
       # Control parameters
-      angular_threshold: 0.01     # rad - Angular threshold for alignment
       marker_timeout: 2.0         # s - Timeout for marker detection loss
       
+      # Smoothing parameters
+      angular_gain: 500.0          # Proportional gain for angular control
+
+      # Trapezoidal velocity profile parameters
+      max_acceleration: 0.25       # m/s^2 - Maximum acceleration
+      max_deceleration: 0.25       # m/s^2 - Maximum deceleration
+      min_linear_vel_threshold: 0.05
+      min_angular_vel_threshold: 0.05 
+      deceleration_step_size: 0.05  # m/s - Step size for deceleration
+      deceleration_distance_threshold: 0.3  # m - Distance threshold for deceleration to use min_deceleration_velocity
+      min_deceleration_velocity: 0.1 # m/s^2 - Minimum deceleration at deceleration distance threshold
     search_action:
       # Default velocity parameters
       default_angular_vel: 0.2    # rad/s - Default angular velocity for search action

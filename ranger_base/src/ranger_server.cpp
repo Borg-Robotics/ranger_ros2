@@ -48,8 +48,7 @@ public:
       marker_detected(false),
       distance_to_marker(-1.0),
       curr_linear_vel(0.0),
-      curr_angular_vel(0.0),
-      min_linear_vel(0.35)
+      curr_angular_vel(0.0)
     {
         RCLCPP_INFO(this->get_logger(), "RangerServer node has been started.");
 
@@ -143,8 +142,6 @@ private:
     float distance_to_marker;
     float curr_linear_vel;
     float curr_angular_vel;
-    // Default minimum linear velocity 
-    float min_linear_vel;
     
     // Maximum velocity limits (safety parameters)
     double max_linear_vel_follow;
@@ -154,28 +151,45 @@ private:
     // Parameter values
     double default_linear_vel;
     double default_angular_vel;
-    double default_min_distance;
-    double angular_threshold;
     double marker_timeout;
+    double angular_gain;
+    double max_acceleration;
+    double max_deceleration;
+    double min_linear_vel_threshold;
+    double min_angular_vel_threshold;
+    double deceleration_step_size;
+    double deceleration_distance_threshold;
+    double min_deceleration_velocity;
     double search_timeout;
     double default_search_angular_vel;
     int default_search_direction;
     bool debug_enabled;
     int throttle_duration;
 
+    // Trapezoidal Velocity Profile Variables
+    bool velocity_profile_initialized;
+    rclcpp::Time last_control_time;
+    double current_target_velocity;
+
+    double prev_linear_vel;
+    double prev_angular_vel;
     // Parameter initialization method
     void initialize_parameters()
     {
         // Follow action parameters
         this->declare_parameter("follow_action.default_linear_vel", 0.5);
         this->declare_parameter("follow_action.default_angular_vel", 0.75);
-        this->declare_parameter("follow_action.default_min_distance", 0.75);
-        this->declare_parameter("follow_action.min_linear_vel", 0.35);
         this->declare_parameter("follow_action.max_linear_vel", 1.5);
         this->declare_parameter("follow_action.max_angular_vel", 2.0);
-        this->declare_parameter("follow_action.angular_threshold", 0.1);
         this->declare_parameter("follow_action.marker_timeout", 2.0);
-        
+        this->declare_parameter("follow_action.angular_gain", 2.0);
+        this->declare_parameter("follow_action.max_acceleration", 0.2);
+        this->declare_parameter("follow_action.max_deceleration", 0.2);
+        this->declare_parameter("follow_action.min_linear_vel_threshold", 0.05);
+        this->declare_parameter("follow_action.min_angular_vel_threshold", 0.05);
+        this->declare_parameter("follow_action.deceleration_step_size", 0.05);
+        this->declare_parameter("follow_action.deceleration_distance_threshold", 0.3);
+        this->declare_parameter("follow_action.min_deceleration_velocity", 0.1);
         // Search action parameters
         this->declare_parameter("search_action.default_angular_vel", 0.75);
         this->declare_parameter("search_action.default_direction", 1);
@@ -205,13 +219,17 @@ private:
         // Follow action parameters
         default_linear_vel      = this->get_parameter("follow_action.default_linear_vel").as_double();
         default_angular_vel     = this->get_parameter("follow_action.default_angular_vel").as_double();
-        default_min_distance    = this->get_parameter("follow_action.default_min_distance").as_double();
-        min_linear_vel          = this->get_parameter("follow_action.min_linear_vel").as_double();
         max_linear_vel_follow   = this->get_parameter("follow_action.max_linear_vel").as_double();
         max_angular_vel_follow  = this->get_parameter("follow_action.max_angular_vel").as_double();
-        angular_threshold       = this->get_parameter("follow_action.angular_threshold").as_double();
         marker_timeout          = this->get_parameter("follow_action.marker_timeout").as_double();
-        
+        angular_gain            = this->get_parameter("follow_action.angular_gain").as_double();
+        max_acceleration        = this->get_parameter("follow_action.max_acceleration").as_double();
+        max_deceleration        = this->get_parameter("follow_action.max_deceleration").as_double();
+        min_linear_vel_threshold  = this->get_parameter("follow_action.min_linear_vel_threshold").as_double();
+        min_angular_vel_threshold = this->get_parameter("follow_action.min_angular_vel_threshold").as_double();
+        deceleration_step_size    = this->get_parameter("follow_action.deceleration_step_size").as_double();
+        deceleration_distance_threshold = this->get_parameter("follow_action.deceleration_distance_threshold").as_double();
+        min_deceleration_velocity = this->get_parameter("follow_action.min_deceleration_velocity").as_double();
         // Search action parameters
         default_search_angular_vel = this->get_parameter("search_action.default_angular_vel").as_double();
         default_search_direction   = this->get_parameter("search_action.default_direction").as_int();
@@ -225,7 +243,6 @@ private:
         // Initialize default values
         linear_vel   = default_linear_vel;
         angular_vel  = default_angular_vel;
-        min_distance = default_min_distance;
     }
     
     void log_parameter_summary()
@@ -236,7 +253,16 @@ private:
                    default_linear_vel, max_linear_vel_follow);
         RCLCPP_INFO(this->get_logger(), "  Default angular vel: %.2f rad/s (max: %.2f rad/s)", 
                    default_angular_vel, max_angular_vel_follow);
-        RCLCPP_INFO(this->get_logger(), "  Default min distance: %.2f m", default_min_distance);
+        RCLCPP_INFO(this->get_logger(), "  Marker timeout: %.1f s", marker_timeout);
+        RCLCPP_INFO(this->get_logger(), "  Angular gain: %.2f", angular_gain);
+        RCLCPP_INFO(this->get_logger(), "  Max acceleration: %.2f m/s^2", max_acceleration);
+        RCLCPP_INFO(this->get_logger(), "  Max deceleration: %.2f m/s^2", max_deceleration);
+        RCLCPP_INFO(this->get_logger(), "  Min linear vel threshold: %.2f m/s", min_linear_vel_threshold);
+        RCLCPP_INFO(this->get_logger(), "  Min angular vel threshold: %.2f rad/s", min_angular_vel_threshold);
+        RCLCPP_INFO(this->get_logger(), "  Deceleration step size: %.2f m/s^2", deceleration_step_size);
+        RCLCPP_INFO(this->get_logger(), "  Deceleration distance threshold: %.2f m", deceleration_distance_threshold);
+        RCLCPP_INFO(this->get_logger(), "  Min deceleration velocity: %.2f m/s", min_deceleration_velocity);
+
         RCLCPP_INFO(this->get_logger(), "Search Action:");
         RCLCPP_INFO(this->get_logger(), "  Default angular vel: %.2f rad/s (max: %.2f rad/s)", 
                    default_search_angular_vel, max_angular_vel_search);
@@ -301,6 +327,8 @@ private:
 
     void handle_follow_accepted(const std::shared_ptr<GoalHandleArucoFollow> goal_handle)
     {
+        // Update parameters
+        load_parameters();
         // Get goal request parameters
         auto goal = goal_handle->get_goal();
         // Mandatory request parameters
@@ -335,6 +363,10 @@ private:
             if(check_aruco_topic_availability()){
                 follow_active   = true;
                 marker_detected = false;
+                // Initialize velocity profile parameters
+                velocity_profile_initialized = false;
+                last_control_time            = this->get_clock()->now();
+                current_target_velocity      = 0.0;
                 RCLCPP_INFO(this->get_logger(), 
                     "Starting to follow marker ID: %ld | min_distance: %.2f | linear_vel: %.2f | angular_vel: %.2f",
                     follow_marker_id, min_distance, linear_vel, angular_vel);
@@ -389,6 +421,8 @@ private:
     
     void handle_search_accepted(const std::shared_ptr<GoalHandleArucoSearch> goal_handle)
     {
+        // Update parameters
+        load_parameters();
         // Get goal request parameters
         auto goal = goal_handle->get_goal();
         search_marker_id = goal->marker_id;
@@ -518,17 +552,23 @@ private:
     void control_follow_action()
     {
         if (!follow_active || !current_follow_goal_handle) return;
-        
+        // Reset Velocity Profile
+        if (!velocity_profile_initialized) {
+            velocity_profile_initialized = false;
+            current_target_velocity     = 0.0;
+            prev_linear_vel             = 0.0;
+            prev_angular_vel            = 0.0;
+            last_control_time           = this->get_clock()->now();
+        }
         // Check if marker was detected recently using parameter-based timeout
         if (!marker_detected || 
             (this->get_clock()->now() - last_marker_time).seconds() > marker_timeout) {
             
             if (marker_detected) {
                 RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), throttle_duration,
-                    "Marker %ld not detected recently. Stopping robot.", follow_marker_id);
+                    "Marker %ld not detected recently.", follow_marker_id);
             }
             
-            stop_robot();
             return;
         }
         
@@ -601,6 +641,84 @@ private:
         );
     }
 
+    double round_to_precision(double value, int decimal_places = 3)
+    {
+        double multiplier = std::pow(10.0, decimal_places);
+        return std::round(value * multiplier) / multiplier;
+    }
+    
+    double filter_angular_velocity(double angular_vel)
+    {
+        // Filter out very small angular velocities
+        if (std::abs(angular_vel) < min_angular_vel_threshold) {
+            return min_angular_vel_threshold;
+        }
+        return round_to_precision(angular_vel, 3);
+    }
+    
+    double filter_linear_velocity(double linear_vel)
+    {
+        // Filter out very small linear velocities
+        if (std::abs(linear_vel) < min_linear_vel_threshold) {
+            return min_linear_vel_threshold;
+        }
+        return round_to_precision(linear_vel, 3);
+    }
+
+    double calculate_target_velocity()
+    {
+        auto current_time = this->get_clock()->now();
+        double dt = velocity_profile_initialized ? (current_time - last_control_time).seconds() : 0.1;
+        last_control_time = current_time;
+
+        if (!velocity_profile_initialized) {
+            current_target_velocity = 0.0;
+            velocity_profile_initialized = true;
+            return current_target_velocity;
+        }
+
+        dt = std::max(0.01, std::min(dt, 0.2));
+        double remaining_distance = distance_to_marker - min_distance;
+        
+        double desired_velocity = 0.0;
+        
+        if (remaining_distance <= deceleration_distance_threshold) {
+            // STEPPED DECELERATION PHASE with minimum velocity limit
+            // Calculate number of steps based on distance
+            int steps_from_max = static_cast<int>((linear_vel - min_deceleration_velocity) / deceleration_step_size);
+            double distance_per_step = deceleration_distance_threshold / steps_from_max;
+            int current_step = static_cast<int>(remaining_distance / distance_per_step);
+            
+            // Calculate stepped velocity but ensure it doesn't go below minimum
+            double stepped_velocity = min_deceleration_velocity + (current_step * deceleration_step_size);
+            desired_velocity = std::max(min_deceleration_velocity, 
+                                      std::min(stepped_velocity, static_cast<double>(linear_vel)));
+        } else {
+            // ACCELERATION/CRUISE PHASE
+            desired_velocity = linear_vel;
+        }
+
+        // Smooth velocity changes
+        double velocity_error = desired_velocity - current_target_velocity;
+        double max_change = (velocity_error > 0) ? max_acceleration * dt : max_deceleration * dt;
+        
+        if (std::abs(velocity_error) > max_change) {
+            current_target_velocity += std::copysign(max_change, velocity_error);
+        } else {
+            current_target_velocity = desired_velocity;
+        }
+
+        // Ensure bounds - maintain minimum velocity during motion unless stopping
+        if (remaining_distance > 0.02) {
+            current_target_velocity = std::max(min_deceleration_velocity, 
+                                              std::min(current_target_velocity, static_cast<double>(linear_vel)));
+        } else {
+            current_target_velocity = std::max(0.0, std::min(current_target_velocity, static_cast<double>(linear_vel)));
+        }
+        
+        return filter_linear_velocity(current_target_velocity);
+    }
+
     void move_towards_marker()
     {
         auto twist_msg = geometry_msgs::msg::Twist();
@@ -611,34 +729,47 @@ private:
             current_marker_pose.position.x
         );
         
-        // Angular velocity (turn towards marker) using parameter-based threshold
-        if (std::abs(angle_to_marker) > angular_threshold) {
-            twist_msg.angular.z = std::copysign(angular_vel, angle_to_marker);
-            
-            // No linear speed when turning
-            twist_msg.linear.x = 0.0;
-        } else {
-            // Move forward when aligned
-            twist_msg.angular.z = 0.0;
-            
-            // use minimum linear vel 0.5 m from the minimum distance
-            if (distance_to_marker < min_distance + 0.5) {
-                twist_msg.linear.x = std::min(min_linear_vel, linear_vel);
-            } else {
-                twist_msg.linear.x = linear_vel;
-            }                     
+        // Angular correction (proportional control)
+        double raw_angular_vel = std::max(-static_cast<double>(angular_vel),
+                                         std::min(static_cast<double>(angular_vel), static_cast<double>(angle_to_marker * angular_gain)));
+        
+        // Apply angular velocity filtering
+        double filtered_angular = filter_angular_velocity(raw_angular_vel);
+        
+        // Improved alignment factor
+        float alignment_factor = std::max(0.5f, 1.0f - std::abs(angle_to_marker) / static_cast<float>(M_PI));
+
+        // Apply Trapezoidal velocity profile with filtering
+        double target_velocity = calculate_target_velocity();
+        double raw_linear_vel = target_velocity * alignment_factor;
+        double filtered_linear = filter_linear_velocity(raw_linear_vel);
+        
+        // Continuity check - avoid sudden drops to zero
+        if (prev_linear_vel > 0.05 && filtered_linear == 0.0 && target_velocity > min_deceleration_velocity) {
+            filtered_linear = std::max(0.02, prev_linear_vel * 0.5); // Gradual reduction instead of sudden stop
         }
         
-        // Update current velocities
+        if (prev_angular_vel > 0.02 && filtered_angular == 0.0 && std::abs(raw_angular_vel) > 0.01) {
+            filtered_angular = std::max(0.01, prev_angular_vel * 0.5); // Gradual reduction instead of sudden stop
+        }
+        
+        twist_msg.angular.z = filtered_angular;
+        twist_msg.linear.x = filtered_linear;
+        
+        // Update previous velocities
+        prev_linear_vel = filtered_linear;
+        prev_angular_vel = filtered_angular;
+        
+        // Update current velocities with filtered values
         curr_linear_vel  = twist_msg.linear.x;
         curr_angular_vel = twist_msg.angular.z;
-        // Publish the velocity command
+        
         cmd_vel_publisher->publish(twist_msg);
         
         if (debug_enabled) {
             RCLCPP_DEBUG(this->get_logger(), 
-                "Moving: linear=%.2f, angular=%.2f, distance=%.2f, angle=%.2f",
-                twist_msg.linear.x, twist_msg.angular.z, distance_to_marker, angle_to_marker);
+                "Moving: linear=%.3f, angular=%.3f, distance=%.3f, angle=%.3f, alignment=%.3f",
+                twist_msg.linear.x, twist_msg.angular.z, distance_to_marker, angle_to_marker, alignment_factor);
         }
     }
 
@@ -677,6 +808,7 @@ private:
         
         cmd_vel_publisher->publish(twist_msg);
     }
+
 };
 
 } // namespace ranger_base
