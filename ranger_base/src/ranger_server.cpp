@@ -132,6 +132,9 @@ private:
     int64_t search_direction; 
     float search_angular_vel;
     rclcpp::Time search_start_time;
+    bool alignment_phase;
+    bool alignment_marker_detected;
+    geometry_msgs::msg::Pose alignment_marker_pose;
 
     // Marker state
     bool marker_detected;
@@ -163,6 +166,7 @@ private:
     double search_timeout;
     double default_search_angular_vel;
     int default_search_direction;
+    double alignment_tolerance;
     bool debug_enabled;
     int throttle_duration;
 
@@ -195,7 +199,7 @@ private:
         this->declare_parameter("search_action.default_direction", 1);
         this->declare_parameter("search_action.max_angular_vel", 2.0);
         this->declare_parameter("search_action.search_timeout", 60.0);
-        
+        this->declare_parameter("search_action.alignment_tolerance", 0.1); //radians
         // Topic parameters
         this->declare_parameter("topics.aruco_markers", "/aruco_markers");
         this->declare_parameter("topics.cmd_vel", "/cmd_vel");
@@ -235,7 +239,7 @@ private:
         default_search_direction   = this->get_parameter("search_action.default_direction").as_int();
         max_angular_vel_search     = this->get_parameter("search_action.max_angular_vel").as_double();
         search_timeout             = this->get_parameter("search_action.search_timeout").as_double();
-        
+        alignment_tolerance        = this->get_parameter("search_action.alignment_tolerance").as_double();
         // Logging parameters
         debug_enabled     = this->get_parameter("logging.debug_enabled").as_bool();
         throttle_duration = this->get_parameter("logging.throttle_duration").as_int();
@@ -267,6 +271,7 @@ private:
         RCLCPP_INFO(this->get_logger(), "  Default angular vel: %.2f rad/s (max: %.2f rad/s)", 
                    default_search_angular_vel, max_angular_vel_search);
         RCLCPP_INFO(this->get_logger(), "  Search timeout: %.1f s", search_timeout);
+        RCLCPP_INFO(this->get_logger(), "  Alignment tolerance: %.2f radians", alignment_tolerance);
         RCLCPP_INFO(this->get_logger(), "=========================================");
     }
     
@@ -414,7 +419,9 @@ private:
 
         // Stop the robot
         stop_robot();
-        search_active = false;
+        search_active             = false;
+        alignment_phase           = false;
+        alignment_marker_detected = false;
 
         return rclcpp_action::CancelResponse::ACCEPT;
     }
@@ -452,8 +459,10 @@ private:
         if(valid) {
             current_search_goal_handle = goal_handle;
             if(check_aruco_topic_availability()){
-                search_active      = true;
-                marker_detected    = false;
+                search_active             = true;
+                marker_detected           = false;
+                alignment_phase           = false;
+                alignment_marker_detected = false;
                 search_start_time  = this->get_clock()->now();
                 RCLCPP_INFO(this->get_logger(), 
                     "Starting to search for marker ID: %ld | angular_vel: %.2f | direction: %s",
@@ -523,20 +532,71 @@ private:
             
             // Check for search action
             if (search_active && msg->marker_ids[i] == search_marker_id) {
-                marker_detected = true;
+                if(!alignment_phase) {
+                // SEARCH PHASE: Marker found for the first time
+                marker_detected           = true;
+                alignment_marker_detected = true;
+                alignment_phase           = true;
+                alignment_marker_pose = msg->poses[i];
                 last_marker_time = this->get_clock()->now();
                 
                 RCLCPP_INFO(this->get_logger(), 
-                    "Found target marker %ld during search!", search_marker_id);
-                
-                // Stop the robot and complete the search action
-                stop_robot();
-                search_result->success = true;
-                search_result->message = "Successfully found marker " + std::to_string(search_marker_id);
-                current_search_goal_handle->succeed(search_result);
-                search_active = false;
-                return;
+                    "Found target marker %ld during search! Starting alignment phase.", search_marker_id);
+                return; // Continue in alignment phase
+                } else {
+                    // ALIGNMENT PHASE: Update marker pose for alignment control
+                    alignment_marker_detected = true;
+                    alignment_marker_pose     = msg->poses[i];
+                    if(debug_enabled){
+                        RCLCPP_DEBUG(this->get_logger(), 
+                            "Alignment phase: Detected marker %ld at position (%.2f, %.2f, %.2f)", 
+                            search_marker_id,
+                            alignment_marker_pose.position.x,
+                            alignment_marker_pose.position.y,
+                            alignment_marker_pose.position.z);
+                    }
+                    return;
+                }
             }
+        }
+    }
+
+    void control_search_alignment(){
+        // calculate angle to marker
+        float angle_to_marker = std::atan2(
+            alignment_marker_pose.position.y, 
+            alignment_marker_pose.position.x
+        );
+
+        // Check if we are aligned withen tolerance
+        if (std::abs(angle_to_marker) <= alignment_tolerance) {
+            RCLCPP_INFO(this->get_logger(), 
+                "Aligned with marker %ld within tolerance (%.2f radians). Stopping search action.", 
+                search_marker_id, alignment_tolerance);
+            
+            stop_robot();
+            
+            // Send success result
+            search_result->success = true;
+            search_result->message = "Successfully aligned with marker " + std::to_string(search_marker_id);
+            current_search_goal_handle->succeed(search_result);
+            search_active = false;
+            return;
+        }
+
+        // Continue  alignment rotation at slower speed
+        auto twist_msg      = geometry_msgs::msg::Twist();
+        twist_msg.angular.z = search_angular_vel * search_direction * 0.5; 
+        cmd_vel_publisher->publish(twist_msg);
+
+        // Update feedback
+        search_feedback->curr_angular_vel = std::round(twist_msg.angular.z * 1000.0f) / 1000.0f;
+        search_feedback->elapsed_time     = (this->get_clock()->now() - search_start_time).seconds();
+        current_search_goal_handle->publish_feedback(search_feedback);
+        if (debug_enabled) {
+        RCLCPP_DEBUG(this->get_logger(), 
+            "Aligning: angular=%.2f, angle_to_marker=%.3f rad (%.1f deg)",
+            twist_msg.angular.z, angle_to_marker, angle_to_marker * 180.0 / M_PI);
         }
     }
 
@@ -603,6 +663,12 @@ private:
 
     void control_search_action()
     { 
+        // Alignment phase
+        if(alignment_phase) {
+            control_search_alignment();
+            return;
+        }
+        // Search phase
         // Calculate elapsed time since search started
         auto current_time = this->get_clock()->now();
         double elapsed_time = (current_time - search_start_time).seconds();
