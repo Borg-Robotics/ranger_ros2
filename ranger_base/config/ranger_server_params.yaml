@@ -25,6 +25,8 @@ ranger_server:
       deceleration_step_size: 0.05  # m/s - Step size for deceleration
       deceleration_distance_threshold: 0.3  # m - Distance threshold for deceleration to use min_deceleration_velocity
       min_deceleration_velocity: 0.1 # m/s^2 - Minimum deceleration at deceleration distance threshold
+      # Alignment parameters
+      alignment_tolerance: 0.01     # rad - Tolerance for alignment [Dead-Zone] (0.57 degrees)
     
     search_action:
       # Default velocity parameters

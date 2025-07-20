@@ -163,10 +163,11 @@ private:
     double deceleration_step_size;
     double deceleration_distance_threshold;
     double min_deceleration_velocity;
+    double follow_alignment_tolerance;
     double search_timeout;
     double default_search_angular_vel;
     int default_search_direction;
-    double alignment_tolerance;
+    double search_alignment_tolerance;
     bool debug_enabled;
     int throttle_duration;
 
@@ -194,6 +195,7 @@ private:
         this->declare_parameter("follow_action.deceleration_step_size", 0.05);
         this->declare_parameter("follow_action.deceleration_distance_threshold", 0.3);
         this->declare_parameter("follow_action.min_deceleration_velocity", 0.1);
+        this->declare_parameter("follow_action.alignment_tolerance", 0.1); 
         // Search action parameters
         this->declare_parameter("search_action.default_angular_vel", 0.75);
         this->declare_parameter("search_action.default_direction", 1);
@@ -234,12 +236,13 @@ private:
         deceleration_step_size    = this->get_parameter("follow_action.deceleration_step_size").as_double();
         deceleration_distance_threshold = this->get_parameter("follow_action.deceleration_distance_threshold").as_double();
         min_deceleration_velocity = this->get_parameter("follow_action.min_deceleration_velocity").as_double();
+        follow_alignment_tolerance = this->get_parameter("follow_action.alignment_tolerance").as_double();
         // Search action parameters
         default_search_angular_vel = this->get_parameter("search_action.default_angular_vel").as_double();
         default_search_direction   = this->get_parameter("search_action.default_direction").as_int();
         max_angular_vel_search     = this->get_parameter("search_action.max_angular_vel").as_double();
         search_timeout             = this->get_parameter("search_action.search_timeout").as_double();
-        alignment_tolerance        = this->get_parameter("search_action.alignment_tolerance").as_double();
+        search_alignment_tolerance = this->get_parameter("search_action.alignment_tolerance").as_double();
         // Logging parameters
         debug_enabled     = this->get_parameter("logging.debug_enabled").as_bool();
         throttle_duration = this->get_parameter("logging.throttle_duration").as_int();
@@ -266,12 +269,12 @@ private:
         RCLCPP_INFO(this->get_logger(), "  Deceleration step size: %.2f m/s^2", deceleration_step_size);
         RCLCPP_INFO(this->get_logger(), "  Deceleration distance threshold: %.2f m", deceleration_distance_threshold);
         RCLCPP_INFO(this->get_logger(), "  Min deceleration velocity: %.2f m/s", min_deceleration_velocity);
-
+        RCLCPP_INFO(this->get_logger(), "  Follow alignment tolerance: %.2f radians", follow_alignment_tolerance);
         RCLCPP_INFO(this->get_logger(), "Search Action:");
         RCLCPP_INFO(this->get_logger(), "  Default angular vel: %.2f rad/s (max: %.2f rad/s)", 
                    default_search_angular_vel, max_angular_vel_search);
         RCLCPP_INFO(this->get_logger(), "  Search timeout: %.1f s", search_timeout);
-        RCLCPP_INFO(this->get_logger(), "  Alignment tolerance: %.2f radians", alignment_tolerance);
+        RCLCPP_INFO(this->get_logger(), "  Alignment tolerance: %.2f radians", search_alignment_tolerance);
         RCLCPP_INFO(this->get_logger(), "=========================================");
     }
     
@@ -569,10 +572,10 @@ private:
         );
 
         // Check if we are aligned withen tolerance
-        if (std::abs(angle_to_marker) <= alignment_tolerance) {
+        if (std::abs(angle_to_marker) <= search_alignment_tolerance) {
             RCLCPP_INFO(this->get_logger(), 
                 "Aligned with marker %ld within tolerance (%.2f radians). Stopping search action.", 
-                search_marker_id, alignment_tolerance);
+                search_marker_id, search_alignment_tolerance);
             
             stop_robot();
             
@@ -795,9 +798,12 @@ private:
             current_marker_pose.position.x
         );
         
-        // Angular correction (proportional control)
-        double raw_angular_vel = std::max(-static_cast<double>(angular_vel),
+        // Angular correction withen alignment tolerance [dead-zone](proportional control)
+        double raw_angular_vel = 0.0;
+        if( std::abs(angle_to_marker) > follow_alignment_tolerance) {
+            raw_angular_vel = std::max(-static_cast<double>(angular_vel),
                                          std::min(static_cast<double>(angular_vel), static_cast<double>(angle_to_marker * angular_gain)));
+        }
         
         // Apply angular velocity filtering
         double filtered_angular = filter_angular_velocity(raw_angular_vel);
@@ -815,7 +821,9 @@ private:
             filtered_linear = std::max(0.02, prev_linear_vel * 0.5); // Gradual reduction instead of sudden stop
         }
         
-        if (prev_angular_vel > 0.02 && filtered_angular == 0.0 && std::abs(raw_angular_vel) > 0.01) {
+        // Modified continuity check for angular velocity - only apply if outside tolerance
+        if (std::abs(angle_to_marker) > follow_alignment_tolerance && 
+            prev_angular_vel > 0.02 && filtered_angular == 0.0 && std::abs(raw_angular_vel) > 0.01) {
             filtered_angular = std::max(0.01, prev_angular_vel * 0.5); // Gradual reduction instead of sudden stop
         }
         
@@ -834,8 +842,9 @@ private:
         
         if (debug_enabled) {
             RCLCPP_DEBUG(this->get_logger(), 
-                "Moving: linear=%.3f, angular=%.3f, distance=%.3f, angle=%.3f, alignment=%.3f",
-                twist_msg.linear.x, twist_msg.angular.z, distance_to_marker, angle_to_marker, alignment_factor);
+                "Moving: linear=%.3f, angular=%.3f, distance=%.3f, angle=%.3f (tol=%.3f), alignment=%.3f",
+                twist_msg.linear.x, twist_msg.angular.z, distance_to_marker, 
+                angle_to_marker, follow_alignment_tolerance, alignment_factor);
         }
     }
 
