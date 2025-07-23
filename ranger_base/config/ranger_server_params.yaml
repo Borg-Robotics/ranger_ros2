@@ -8,22 +8,22 @@ ranger_server:
     # Action Server Parameters
     follow_action:
       # Default velocity parameters
-      default_linear_vel: 0.25    # m/s - Default linear velocity for follow action
+      default_linear_vel: 0.5    # m/s - Default linear velocity for follow action
       default_angular_vel: 0.15   # rad/s - Default angular velocity for follow action
       # Maximum velocity limits (safety parameters)
-      max_linear_vel: 1.0         # m/s - Maximum allowed linear velocity
+      max_linear_vel: 0.75         # m/s - Maximum allowed linear velocity
       max_angular_vel: 0.3        # rad/s - Maximum allowed angular velocity
       # Control parameters
       marker_timeout: 2.0         # s - Timeout for marker detection loss 
       # Smoothing parameters
-      angular_gain: 500.0          # Proportional gain for angular control
+      angular_gain: 1.0          # Proportional gain for angular control
       # Trapezoidal velocity profile parameters
       max_acceleration: 0.25       # m/s^2 - Maximum acceleration
       max_deceleration: 0.25       # m/s^2 - Maximum deceleration
       min_linear_vel_threshold: 0.05
-      min_angular_vel_threshold: 0.05 
-      deceleration_step_size: 0.05  # m/s - Step size for deceleration
-      deceleration_distance_threshold: 0.3  # m - Distance threshold for deceleration to use min_deceleration_velocity
+      min_angular_vel_threshold: 0.0 
+      deceleration_step_size: 0.02  # m/s - Step size for deceleration
+      deceleration_distance_threshold: 1.0  # m - Distance threshold for deceleration to use min_deceleration_velocity
       min_deceleration_velocity: 0.1 # m/s^2 - Minimum deceleration at deceleration distance threshold
       # Alignment parameters
       alignment_tolerance: 0.01     # rad - Tolerance for alignment [Dead-Zone] (0.57 degrees)
@@ -35,7 +35,7 @@ ranger_server:
       # Maximum velocity limits (safety parameters)
       max_angular_vel: 0.3        # rad/s - Maximum allowed angular velocity for search
       # Timeout parameters
-      search_timeout: 60.0        # s - Maximum time to search for marker
+      search_timeout: 30.0        # s - Maximum time to search for marker
       # Alignment parameters
       alignment_tolerance: 0.01    # rad - Tolerance for alignment phase (0.57 degrees)
 
@@ -46,7 +46,7 @@ ranger_server:
       
     # Control loop parameters
     control:
-      loop_rate: 10.0             # Hz - Control loop frequency (100ms = 10Hz)
+      loop_rate: 100.0             # Hz - Control loop frequency (100ms = 10Hz)
       
     # Logging parameters
     logging:
