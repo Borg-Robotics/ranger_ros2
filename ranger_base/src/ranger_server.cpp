@@ -17,6 +17,7 @@
 #include <ros2_aruco_interfaces/msg/aruco_markers.hpp>
 #include <ranger_msgs/action/aruco_follow.hpp>
 #include <ranger_msgs/action/aruco_search.hpp>
+#include <ranger_msgs/action/aruco_strafe.hpp>
 
 using namespace std::chrono_literals;
 
@@ -32,6 +33,9 @@ public:
     using ArucoSearch = ranger_msgs::action::ArucoSearch;
     using GoalHandleArucoSearch = rclcpp_action::ServerGoalHandle<ArucoSearch>;
 
+    using ArucoStrafe = ranger_msgs::action::ArucoStrafe;
+    using GoalHandleArucoStrafe = rclcpp_action::ServerGoalHandle<ArucoStrafe>;
+
     RangerServer()
     : Node("ranger_server"),
       // Follow Action Variables
@@ -44,13 +48,21 @@ public:
       search_marker_id(-1),
       search_active(false),
       search_start_time(this->get_clock()->now()),
+      // Strafe Action Variables
+      strafe_marker_id(-1),
+      strafe_active(false),
+      strafe_direction(1),
+      strafe_start_time(this->get_clock()->now()),
+      strafe_alignment_phase(false),
+      strafe_marker_detected(false),
       // Helper Variables
       marker_detected(false),
       distance_to_marker(-1.0),
       curr_linear_vel(0.0),
       curr_angular_vel(0.0),
       last_follow_feedback_time(this->get_clock()->now()),
-      last_search_feedback_time(this->get_clock()->now())
+      last_search_feedback_time(this->get_clock()->now()),
+      last_strafe_feedback_time(this->get_clock()->now())
     {
         RCLCPP_INFO(this->get_logger(), "RangerServer node has been started.");
 
@@ -72,11 +84,20 @@ public:
             std::bind(&RangerServer::handle_search_cancel, this, std::placeholders::_1),
             std::bind(&RangerServer::handle_search_accepted, this, std::placeholders::_1));
 
+        this->strafe_action_server = rclcpp_action::create_server<ArucoStrafe>(
+            this,
+            "strafe_aruco",
+            std::bind(&RangerServer::handle_strafe_goal, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&RangerServer::handle_strafe_cancel, this, std::placeholders::_1),
+            std::bind(&RangerServer::handle_strafe_accepted, this, std::placeholders::_1));
+
         // Initialize actions result and feedback
         follow_result   = std::make_shared<ArucoFollow::Result>();
         follow_feedback = std::make_shared<ArucoFollow::Feedback>();
         search_result   = std::make_shared<ArucoSearch::Result>();
         search_feedback = std::make_shared<ArucoSearch::Feedback>();
+        strafe_result   = std::make_shared<ArucoStrafe::Result>();
+        strafe_feedback = std::make_shared<ArucoStrafe::Feedback>();
 
         // Create subscribers and publishers using parameters
         std::string aruco_topic   = this->get_parameter("topics.aruco_markers").as_string();
@@ -95,13 +116,14 @@ public:
 
         RCLCPP_INFO(this->get_logger(), "Action server '/follow_aruco' is ready.");
         RCLCPP_INFO(this->get_logger(), "Action server '/search_aruco' is ready.");
-
+        RCLCPP_INFO(this->get_logger(), "Action server '/strafe_aruco' is ready.");
     }
 
 private:
     // Actions server
     rclcpp_action::Server<ArucoFollow>::SharedPtr follow_action_server;
     rclcpp_action::Server<ArucoSearch>::SharedPtr search_action_server;
+    rclcpp_action::Server<ArucoStrafe>::SharedPtr strafe_action_server;
 
     // Publishers and subscribers
     rclcpp::Subscription<ros2_aruco_interfaces::msg::ArucoMarkers>::SharedPtr aruco_subscriber;
@@ -115,10 +137,13 @@ private:
     std::shared_ptr<ArucoFollow::Feedback> follow_feedback;
     std::shared_ptr<ArucoSearch::Result> search_result;
     std::shared_ptr<ArucoSearch::Feedback> search_feedback;
-    
+    std::shared_ptr<ArucoStrafe::Result> strafe_result;
+    std::shared_ptr<ArucoStrafe::Feedback> strafe_feedback;
+
     // Current goal handle
     std::shared_ptr<GoalHandleArucoFollow> current_follow_goal_handle;
     std::shared_ptr<GoalHandleArucoSearch> current_search_goal_handle;
+    std::shared_ptr<GoalHandleArucoStrafe> current_strafe_goal_handle;
 
     // Follow Action variables
     int64_t follow_marker_id;
@@ -136,6 +161,15 @@ private:
     bool alignment_phase;
     bool alignment_marker_detected;
     geometry_msgs::msg::Pose alignment_marker_pose;
+
+    // Strafe Action state variables
+    int64_t strafe_marker_id;
+    bool strafe_active;
+    int64_t strafe_direction;
+    rclcpp::Time strafe_start_time;
+    bool strafe_alignment_phase;
+    bool strafe_marker_detected;
+    geometry_msgs::msg::Pose strafe_marker_pose;
 
     // Marker state
     bool marker_detected;
@@ -169,6 +203,11 @@ private:
     double default_search_angular_vel;
     int default_search_direction;
     double search_alignment_tolerance;
+    double strafe_lateral_vel;
+    int default_strafe_direction;
+    double max_lateral_vel;
+    double strafe_timeout;
+    double strafe_alignment_tolerance;
     double loop_rate;
     double feedback_rate;
     bool debug_enabled;
@@ -177,6 +216,7 @@ private:
     // Feedback throttling variables
     rclcpp::Time last_follow_feedback_time;
     rclcpp::Time last_search_feedback_time;
+    rclcpp::Time last_strafe_feedback_time;
 
     // Trapezoidal Velocity Profile Variables
     bool velocity_profile_initialized;
@@ -209,6 +249,12 @@ private:
         this->declare_parameter("search_action.max_angular_vel", 2.0);
         this->declare_parameter("search_action.search_timeout", 60.0);
         this->declare_parameter("search_action.alignment_tolerance", 0.1); //radians
+        // Strafe action parameters
+        this->declare_parameter("strafe_action.default_lateral_vel", 0.5);
+        this->declare_parameter("strafe_action.default_direction", 1);
+        this->declare_parameter("strafe_action.max_lateral_vel", 1.0);
+        this->declare_parameter("strafe_action.strafe_timeout", 30.0);
+        this->declare_parameter("strafe_action.alignment_tolerance", 0.05); //radians
         // Topic parameters
         this->declare_parameter("topics.aruco_markers", "/aruco_markers");
         this->declare_parameter("topics.cmd_vel", "/cmd_vel");
@@ -251,6 +297,12 @@ private:
         max_angular_vel_search     = this->get_parameter("search_action.max_angular_vel").as_double();
         search_timeout             = this->get_parameter("search_action.search_timeout").as_double();
         search_alignment_tolerance = this->get_parameter("search_action.alignment_tolerance").as_double();
+        // Strafe action parameters
+        strafe_lateral_vel         = this->get_parameter("strafe_action.default_lateral_vel").as_double();
+        default_strafe_direction           = this->get_parameter("strafe_action.default_direction").as_int();
+        max_lateral_vel            = this->get_parameter("strafe_action.max_lateral_vel").as_double();
+        strafe_timeout             = this->get_parameter("strafe_action.strafe_timeout").as_double();
+        strafe_alignment_tolerance = this->get_parameter("strafe_action.alignment_tolerance").as_double();
         // Control Loop rate
         loop_rate         = this->get_parameter("control.loop_rate").as_double();
         feedback_rate     = this->get_parameter("control.feedback_rate").as_double();
@@ -288,6 +340,11 @@ private:
                    default_search_angular_vel, max_angular_vel_search);
         RCLCPP_INFO(this->get_logger(), "  Search timeout: %.1f s", search_timeout);
         RCLCPP_INFO(this->get_logger(), "  Alignment tolerance: %.2f radians", search_alignment_tolerance);
+        RCLCPP_INFO(this->get_logger(), "Strafe Action:");
+        RCLCPP_INFO(this->get_logger(), "  Default lateral vel: %.2f m/s (max: %.2f m/s)", 
+                   strafe_lateral_vel, max_lateral_vel);
+        RCLCPP_INFO(this->get_logger(), "  Strafe timeout: %.1f s", strafe_timeout);
+        RCLCPP_INFO(this->get_logger(), "  Alignment tolerance: %.2f radians", strafe_alignment_tolerance);
         RCLCPP_INFO(this->get_logger(), "=========================================");
     }
     
@@ -316,6 +373,17 @@ private:
         return requested_vel;
     }
 
+    double enforce_lateral_velocity_limit(double requested_vel)
+    {
+        if (std::abs(requested_vel) > max_lateral_vel) {
+            RCLCPP_WARN(this->get_logger(), 
+                       "Requested lateral velocity %.2f m/s exceeds maximum limit %.2f m/s. Using maximum value.",
+                       std::abs(requested_vel), max_lateral_vel);
+            return std::copysign(max_lateral_vel, requested_vel);
+        }
+        return requested_vel;
+    }
+
     //  FOLLOW ACTION HANDLERS
     rclcpp_action::GoalResponse handle_follow_goal(
         const rclcpp_action::GoalUUID & uuid,
@@ -325,8 +393,8 @@ private:
         RCLCPP_INFO(this->get_logger(), "Received goal request to follow marker ID: %ld", goal->marker_id);
         
         // Check if another action is already running
-        if (follow_active || search_active) {
-            RCLCPP_WARN(this->get_logger(), "Another follow action is already active. Rejecting new follow goal.");
+        if (follow_active || search_active || strafe_active) {
+            RCLCPP_WARN(this->get_logger(), "Another ranger action is already active. Rejecting new follow goal.");
             return rclcpp_action::GoalResponse::REJECT;
         }
         
@@ -357,8 +425,8 @@ private:
         min_distance     = goal->min_distance;
         
         // Optional parameters with defaults and safety limits
-        double requested_linear_vel  = (goal->linear_vel > 0.0) ? goal->linear_vel : default_linear_vel;
-        double requested_angular_vel = (goal->angular_vel > 0.0) ? goal->angular_vel : default_angular_vel;
+        double requested_linear_vel  = (goal->linear_vel >= 0.0) ? goal->linear_vel : default_linear_vel;
+        double requested_angular_vel = (goal->angular_vel >= 0.0) ? goal->angular_vel : default_angular_vel;
         
         // Enforce velocity limits with safety warnings
         linear_vel  = enforce_linear_velocity_limit(requested_linear_vel, "follow_aruco");
@@ -419,8 +487,8 @@ private:
         RCLCPP_INFO(this->get_logger(), "Received goal request to search marker ID: %ld", goal->marker_id);
         
         // Check if another action is already running
-        if (follow_active || search_active) {
-            RCLCPP_WARN(this->get_logger(), "Another action is already active. Rejecting new search goal.");
+        if (follow_active || search_active || strafe_active) {
+            RCLCPP_WARN(this->get_logger(), "Another rangeraction is already active. Rejecting new search goal.");
             return rclcpp_action::GoalResponse::REJECT;
         }
 
@@ -503,6 +571,97 @@ private:
         }
     }
 
+    // STRAFE ACTION HANDLERS
+    rclcpp_action::GoalResponse handle_strafe_goal(
+        const rclcpp_action::GoalUUID & uuid,
+        std::shared_ptr<const ArucoStrafe::Goal> goal)
+    {
+        (void)uuid;
+        RCLCPP_INFO(this->get_logger(), "Received goal request to strafe marker ID: %ld", goal->marker_id);
+    
+    // Check if another action is already running
+        if (follow_active || search_active || strafe_active) {
+            RCLCPP_WARN(this->get_logger(), "Another ranger action is already active. Rejecting new strafe goal.");
+            return rclcpp_action::GoalResponse::REJECT;
+        }
+
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    }
+
+    rclcpp_action::CancelResponse handle_strafe_cancel(
+        const std::shared_ptr<GoalHandleArucoStrafe> goal_handle)
+    {
+        RCLCPP_INFO(this->get_logger(), "Received request to cancel strafe goal");
+        (void)goal_handle;
+
+        // Stop the robot
+        stop_robot();
+        strafe_active = false;
+
+        return rclcpp_action::CancelResponse::ACCEPT;
+    }
+
+    void handle_strafe_accepted(const std::shared_ptr<GoalHandleArucoStrafe> goal_handle)
+    {
+        // Update parameters
+        load_parameters();
+        // Get goal request parameters
+        auto goal = goal_handle->get_goal();
+        // Mandatory request parameters
+        strafe_marker_id = goal->marker_id;
+        
+        // Optional parameters with defaults and safety limits
+        double requested_lateral_vel = (goal->lateral_vel > 0.0) ? goal->lateral_vel : strafe_lateral_vel;
+        strafe_lateral_vel = enforce_lateral_velocity_limit(requested_lateral_vel);
+
+        strafe_direction   = (goal->direction != 0) ? goal->direction : default_strafe_direction;
+
+        // Check validity of goal parameters
+        bool valid = true;
+        std::string missing_fields;
+
+        // Check if marker_id is specified
+        if(strafe_marker_id <= 0) {
+            valid = false;
+            missing_fields += "marker_id ";
+        }
+        // Validate strafe direction
+        if (strafe_direction != 1 && strafe_direction != -1) {
+            strafe_direction = default_strafe_direction;
+            RCLCPP_WARN(this->get_logger(), "Invalid direction specified, must use [-1 || 1] ,using default value: %s", default_strafe_direction ? "left" : "right");
+        }
+
+        if(valid) {
+            current_strafe_goal_handle = goal_handle;
+            if(check_aruco_topic_availability()){
+                strafe_active = true;
+                marker_detected = false;
+                strafe_alignment_phase = false;
+                strafe_marker_detected = false;
+                strafe_start_time = this->get_clock()->now();
+                RCLCPP_INFO(this->get_logger(), "Strafe action started for marker ID: %ld | lateral_vel: %.2f | direction: %s",
+                    strafe_marker_id, strafe_lateral_vel, (strafe_direction == 1) ? "left" : "right");
+            } else {
+                strafe_active = false;
+                strafe_result->success = false;
+                strafe_result->message = "ERR: No publisher for /aruco_markers topic. Please check the aruco recognition node first.";
+                goal_handle->abort(strafe_result);
+                return;
+            }
+        } else {
+        
+            strafe_active = false;
+            RCLCPP_WARN(this->get_logger(),
+                "Action request missing required field(s) or incorrect values: %s. Please specify them in the action request.",
+                missing_fields.c_str());
+            strafe_result->success = false;
+            strafe_result->message = "Action request failed due to missing or invalid parameters: " + missing_fields;
+            goal_handle->abort(strafe_result);
+            return;
+        }
+    }
+    
+
     bool check_aruco_topic_availability()
     {
         // Get publisher count for the topic
@@ -527,7 +686,7 @@ private:
 
     void aruco_callback(const ros2_aruco_interfaces::msg::ArucoMarkers::SharedPtr msg)
     {
-        if (!follow_active && !search_active) return;
+        if (!follow_active && !search_active && !strafe_active) return;
         
         // Look for the target marker in the message
         for (size_t i = 0; i < msg->marker_ids.size(); ++i) {
@@ -570,6 +729,36 @@ private:
                             alignment_marker_pose.position.x,
                             alignment_marker_pose.position.y,
                             alignment_marker_pose.position.z);
+                    }
+                    return;
+                }
+            }
+            // Check for strafe action
+            if (strafe_active && msg->marker_ids[i] == strafe_marker_id) {
+                if(!strafe_alignment_phase) {
+                    // STRAFE PHASE: Marker found for the first time
+                    marker_detected = true;
+                    strafe_marker_detected = true;
+                    strafe_alignment_phase = true;
+                    strafe_marker_pose = msg->poses[i];
+                    last_marker_time = this->get_clock()->now();
+                    
+                    RCLCPP_INFO(this->get_logger(), 
+                        "Found target marker %ld during strafe! Starting alignment phase.", strafe_marker_id);
+                    return; // Continue in alignment phase
+                } else {
+                    // ALIGNMENT PHASE: Update marker pose for alignment control
+                    strafe_marker_detected = true;
+                    strafe_marker_pose = msg->poses[i];
+                    last_marker_time = this->get_clock()->now();
+                    
+                    if(debug_enabled){
+                        RCLCPP_DEBUG(this->get_logger(), 
+                            "Alignment phase: Detected marker %ld at position (%.2f, %.2f, %.2f)", 
+                            strafe_marker_id,
+                            strafe_marker_pose.position.x,
+                            strafe_marker_pose.position.y,
+                            strafe_marker_pose.position.z);
                     }
                     return;
                 }
@@ -624,6 +813,8 @@ private:
             control_follow_action();
         } else if (search_active && current_search_goal_handle) {
             control_search_action();
+        } else if (strafe_active && current_strafe_goal_handle) {
+            control_strafe_action();
         }
     }
 
@@ -720,6 +911,129 @@ private:
         rotate_robot();
     }
 
+    void control_strafe_action()
+    {
+        if (!strafe_active || !current_strafe_goal_handle) return;
+        
+        // Alignment phase - if marker has been detected
+        if(strafe_alignment_phase) {
+            control_strafe_alignment();
+            return;
+        }
+        
+        // Strafe phase - moving laterally to search for marker
+        // Calculate elapsed time since strafe started
+        auto current_time = this->get_clock()->now();
+        double elapsed_time = (current_time - strafe_start_time).seconds();
+        
+        // Send strafe feedback with elapsed time (throttled)
+        if (should_publish_strafe_feedback()) {
+            strafe_feedback->current_lateral_vel = std::round(strafe_lateral_vel * strafe_direction * 1000.0f) / 1000.0f;
+            strafe_feedback->elapsed_time = elapsed_time;
+            current_strafe_goal_handle->publish_feedback(strafe_feedback);
+        }
+        
+        // Check if we've exceeded the timeout using parameter value
+        if (elapsed_time >= strafe_timeout) {
+            RCLCPP_WARN(this->get_logger(), 
+                "Strafe action timed out after %.1f seconds. Marker %ld not found.", 
+                strafe_timeout, strafe_marker_id);
+            
+            stop_robot();
+            
+            strafe_result->success = false;
+            strafe_result->message = "Marker " + std::to_string(strafe_marker_id) + " not found within timeout period";
+            
+            current_strafe_goal_handle->succeed(strafe_result);
+            strafe_active = false;
+            return;
+        }
+        
+        // Continue strafing
+        strafe_robot();
+    }
+
+    void control_strafe_alignment()
+    {
+        // Check if marker was detected recently using parameter-based timeout
+        if (!strafe_marker_detected || 
+            (this->get_clock()->now() - last_marker_time).seconds() > marker_timeout) {
+            
+            RCLCPP_WARN(this->get_logger(), 
+                "Lost sight of marker %ld during alignment. Stopping strafe action.", 
+                strafe_marker_id);
+            
+            stop_robot();
+            
+            strafe_result->success = false;
+            strafe_result->message = "Lost sight of marker " + std::to_string(strafe_marker_id) + " during alignment";
+            current_strafe_goal_handle->succeed(strafe_result);
+            strafe_active = false;
+            return;
+        }
+        
+        // Calculate angle to marker (alignment based on Y position)
+        float lateral_offset = strafe_marker_pose.position.y;
+        
+        // Check if we are aligned within tolerance (marker is centered)
+        if (std::abs(lateral_offset) <= strafe_alignment_tolerance) {
+            RCLCPP_INFO(this->get_logger(), 
+                "Aligned with marker %ld within tolerance (%.2f). Stopping strafe action.", 
+                strafe_marker_id, strafe_alignment_tolerance);
+            
+            stop_robot();
+            
+            // Send success result
+            strafe_result->success = true;
+            strafe_result->message = "Successfully aligned with marker " + std::to_string(strafe_marker_id);
+            current_strafe_goal_handle->succeed(strafe_result);
+            strafe_active = false;
+            return;
+        }
+
+        // Continue strafing for fine alignment at slower speed
+        auto twist_msg = geometry_msgs::msg::Twist();
+        twist_msg.linear.y = strafe_lateral_vel * strafe_direction * 0.5; // Slower speed for fine alignment
+        
+        cmd_vel_publisher->publish(twist_msg);
+
+        // Update feedback (throttled)
+        if (should_publish_strafe_feedback()) {
+            strafe_feedback->current_lateral_vel = std::round(twist_msg.linear.y * 1000.0f) / 1000.0f;
+            strafe_feedback->elapsed_time = (this->get_clock()->now() - strafe_start_time).seconds();
+            current_strafe_goal_handle->publish_feedback(strafe_feedback);
+        }
+        
+        if (debug_enabled) {
+            RCLCPP_DEBUG(this->get_logger(), 
+                "Aligning: lateral_vel=%.2f, lateral_offset=%.3f",
+                twist_msg.linear.y, lateral_offset);
+        }
+    }
+
+    void strafe_robot()
+    {
+        auto twist_msg = geometry_msgs::msg::Twist();
+        
+        // Set lateral velocity based on direction using strafe_lateral_vel
+        twist_msg.linear.y = strafe_lateral_vel * strafe_direction;
+        
+        // No other movement during strafe
+        twist_msg.linear.x = 0.0;
+        twist_msg.linear.z = 0.0;
+        twist_msg.angular.x = 0.0;
+        twist_msg.angular.y = 0.0;
+        twist_msg.angular.z = 0.0;
+        
+        cmd_vel_publisher->publish(twist_msg);
+        
+        if (debug_enabled) {
+            RCLCPP_DEBUG(this->get_logger(), 
+                "Strafing: lateral_vel=%.2f, direction=%s", 
+                twist_msg.linear.y, (strafe_direction == 1) ? "left" : "right");
+        }
+    }
+
     // Feedback throttling helper methods
     bool should_publish_follow_feedback()
     {
@@ -740,6 +1054,18 @@ private:
         
         if ((current_time - last_search_feedback_time).seconds() >= feedback_period) {
             last_search_feedback_time = current_time;
+            return true;
+        }
+        return false;
+    }
+
+    bool should_publish_strafe_feedback()
+    {
+        auto current_time = this->get_clock()->now();
+        double feedback_period = 1.0 / feedback_rate;  // Convert Hz to seconds
+        
+        if ((current_time - last_strafe_feedback_time).seconds() >= feedback_period) {
+            last_strafe_feedback_time = current_time;
             return true;
         }
         return false;

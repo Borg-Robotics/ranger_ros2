@@ -39,6 +39,17 @@ ranger_server:
       # Alignment parameters
       alignment_tolerance: 0.01    # rad - Tolerance for alignment phase (0.57 degrees)
 
+    strafe_action:
+      # Default velocity
+      default_lateral_vel: 0.25     # m/s - Default lateral velocity for strafe action
+      default_direction: 1          # 1 for left strafe, -1 for right strafe (TODO: CHECK DIRECTIONS)
+      # Maximum velocity limits (safety parameters)
+      max_lateral_vel: 0.5         # m/s - Maximum allowed lateral velocity
+      # Timeout parameters
+      strafe_timeout: 30.0
+      # Alignment parameters
+      alignment_tolerance: 0.01    # m - Tolerance for lateral alignment
+
     # Topic and frame parameters
     topics:
       aruco_markers: "/aruco_markers"  # ArUco markers topic

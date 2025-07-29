@@ -1,0 +1,9 @@
+int64 marker_id
+int8 direction
+float32 lateral_vel
+---
+bool success
+string message
+---
+float32 current_lateral_vel
+float32 elapsed_time
