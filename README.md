@@ -121,6 +121,7 @@ follow_action:
 - **Velocity Limits**: Always set appropriate `max_linear_vel` and `max_angular_vel` for your environment
 - **Timeout Settings**: Adjust `marker_timeout` based on your marker detection reliability
 - **Distance Settings**: Ensure `min_distance` provides safe clearance for your application
+- **Feedback Rate**: Set `feedback_rate` independent of `loop_rate` to prevent message flooding (recommended max: 10 Hz)
 - **Debug Mode**: Enable `debug_enabled: true` during initial testing and tuning
 ## ROS interface
 
@@ -176,6 +177,7 @@ The ranger_server parameters have been significantly enhanced to support advance
 | `topics.aruco_markers` | string | "/aruco_markers" | ArUco markers topic |
 | `topics.cmd_vel` | string | "/cmd_vel" | Velocity command topic |
 | `control.loop_rate` | double | 10.0 | Control loop frequency (Hz) |
+| `control.feedback_rate` | double | 5.0 | Feedback publishing frequency (Hz) - Independent of control loop rate |
 | `logging.debug_enabled` | bool | false | Enable debug logging |
 | `logging.throttle_duration` | int | 2000 | Duration for throttled warnings (ms) |
 
