@@ -48,7 +48,9 @@ public:
       marker_detected(false),
       distance_to_marker(-1.0),
       curr_linear_vel(0.0),
-      curr_angular_vel(0.0)
+      curr_angular_vel(0.0),
+      last_follow_feedback_time(this->get_clock()->now()),
+      last_search_feedback_time(this->get_clock()->now())
     {
         RCLCPP_INFO(this->get_logger(), "RangerServer node has been started.");
 
@@ -168,8 +170,13 @@ private:
     int default_search_direction;
     double search_alignment_tolerance;
     double loop_rate;
+    double feedback_rate;
     bool debug_enabled;
     int throttle_duration;
+
+    // Feedback throttling variables
+    rclcpp::Time last_follow_feedback_time;
+    rclcpp::Time last_search_feedback_time;
 
     // Trapezoidal Velocity Profile Variables
     bool velocity_profile_initialized;
@@ -208,6 +215,7 @@ private:
         
         // Control parameters
         this->declare_parameter("control.loop_rate", 10.0);
+        this->declare_parameter("control.feedback_rate", 5.0);
         
         // Logging parameters
         this->declare_parameter("logging.debug_enabled", false);
@@ -245,6 +253,7 @@ private:
         search_alignment_tolerance = this->get_parameter("search_action.alignment_tolerance").as_double();
         // Control Loop rate
         loop_rate         = this->get_parameter("control.loop_rate").as_double();
+        feedback_rate     = this->get_parameter("control.feedback_rate").as_double();
         // Logging parameters
         debug_enabled     = this->get_parameter("logging.debug_enabled").as_bool();
         throttle_duration = this->get_parameter("logging.throttle_duration").as_int();
@@ -258,6 +267,7 @@ private:
     {
         RCLCPP_INFO(this->get_logger(), "=== Ranger Server Parameter Summary ===");
         RCLCPP_INFO(this->get_logger(), " CONTROL LOOP RATE: %.2f Hz", loop_rate);
+        RCLCPP_INFO(this->get_logger(), " FEEDBACK PUBLISH RATE: %.2f Hz", feedback_rate);
         RCLCPP_INFO(this->get_logger(), "Follow Action:");
         RCLCPP_INFO(this->get_logger(), "  Default linear vel: %.2f m/s (max: %.2f m/s)", 
                    default_linear_vel, max_linear_vel_follow);
@@ -595,10 +605,12 @@ private:
         twist_msg.angular.z = search_angular_vel * search_direction * 0.5; 
         cmd_vel_publisher->publish(twist_msg);
 
-        // Update feedback
-        search_feedback->curr_angular_vel = std::round(twist_msg.angular.z * 1000.0f) / 1000.0f;
-        search_feedback->elapsed_time     = (this->get_clock()->now() - search_start_time).seconds();
-        current_search_goal_handle->publish_feedback(search_feedback);
+        // Update feedback (throttled)
+        if (should_publish_search_feedback()) {
+            search_feedback->curr_angular_vel = std::round(twist_msg.angular.z * 1000.0f) / 1000.0f;
+            search_feedback->elapsed_time     = (this->get_clock()->now() - search_start_time).seconds();
+            current_search_goal_handle->publish_feedback(search_feedback);
+        }
         if (debug_enabled) {
         RCLCPP_DEBUG(this->get_logger(), 
             "Aligning: angular=%.2f, angle_to_marker=%.3f rad (%.1f deg)",
@@ -641,11 +653,13 @@ private:
         // Calculate distance to marker 
         distance_to_marker = calculate_distance_to_marker();
         
-        // Send follow_feedback
-        follow_feedback->distance_to_marker = std::round(distance_to_marker * 1000.0f) / 1000.0f;
-        follow_feedback->curr_linear_vel    = std::round(curr_linear_vel * 1000.0f) / 1000.0f;
-        follow_feedback->curr_angular_vel   = std::round(curr_angular_vel * 1000.0f) / 1000.0f;
-        current_follow_goal_handle->publish_feedback(follow_feedback);
+        // Send follow_feedback (throttled)
+        if (should_publish_follow_feedback()) {
+            follow_feedback->distance_to_marker = std::round(distance_to_marker * 1000.0f) / 1000.0f;
+            follow_feedback->curr_linear_vel    = std::round(curr_linear_vel * 1000.0f) / 1000.0f;
+            follow_feedback->curr_angular_vel   = std::round(curr_angular_vel * 1000.0f) / 1000.0f;
+            current_follow_goal_handle->publish_feedback(follow_feedback);
+        }
         
         // Check if we've reached the minimum distance
         if (distance_to_marker <= min_distance) {
@@ -679,10 +693,12 @@ private:
         auto current_time = this->get_clock()->now();
         double elapsed_time = (current_time - search_start_time).seconds();
         
-        // Send search feedback with elapsed time
-        search_feedback->elapsed_time = elapsed_time;  // This field now represents elapsed time in seconds
-        search_feedback->curr_angular_vel = std::round(search_angular_vel * search_direction * 1000.0f) / 1000.0f;
-        current_search_goal_handle->publish_feedback(search_feedback);
+        // Send search feedback with elapsed time (throttled)
+        if (should_publish_search_feedback()) {
+            search_feedback->elapsed_time = elapsed_time;  // This field now represents elapsed time in seconds
+            search_feedback->curr_angular_vel = std::round(search_angular_vel * search_direction * 1000.0f) / 1000.0f;
+            current_search_goal_handle->publish_feedback(search_feedback);
+        }
         
         // Check if we've exceeded the timeout using parameter value
         if (elapsed_time >= search_timeout) {
@@ -702,6 +718,31 @@ private:
         
         // Continue rotating
         rotate_robot();
+    }
+
+    // Feedback throttling helper methods
+    bool should_publish_follow_feedback()
+    {
+        auto current_time = this->get_clock()->now();
+        double feedback_period = 1.0 / feedback_rate;  // Convert Hz to seconds
+        
+        if ((current_time - last_follow_feedback_time).seconds() >= feedback_period) {
+            last_follow_feedback_time = current_time;
+            return true;
+        }
+        return false;
+    }
+    
+    bool should_publish_search_feedback()
+    {
+        auto current_time = this->get_clock()->now();
+        double feedback_period = 1.0 / feedback_rate;  // Convert Hz to seconds
+        
+        if ((current_time - last_search_feedback_time).seconds() >= feedback_period) {
+            last_search_feedback_time = current_time;
+            return true;
+        }
+        return false;
     }
 
     // Helper functions
