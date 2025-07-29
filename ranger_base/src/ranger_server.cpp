@@ -87,7 +87,6 @@ public:
         cmd_vel_publisher = this->create_publisher<geometry_msgs::msg::Twist>(cmd_vel_topic, 10);
 
         // Timer for control loop using parameter
-        double loop_rate = this->get_parameter("control.loop_rate").as_double();
         auto loop_period = std::chrono::milliseconds(static_cast<int>(1000.0 / loop_rate));
         control_timer = this->create_wall_timer(
             loop_period, std::bind(&RangerServer::control_loop, this));
@@ -168,6 +167,7 @@ private:
     double default_search_angular_vel;
     int default_search_direction;
     double search_alignment_tolerance;
+    double loop_rate;
     bool debug_enabled;
     int throttle_duration;
 
@@ -243,6 +243,8 @@ private:
         max_angular_vel_search     = this->get_parameter("search_action.max_angular_vel").as_double();
         search_timeout             = this->get_parameter("search_action.search_timeout").as_double();
         search_alignment_tolerance = this->get_parameter("search_action.alignment_tolerance").as_double();
+        // Control Loop rate
+        loop_rate         = this->get_parameter("control.loop_rate").as_double();
         // Logging parameters
         debug_enabled     = this->get_parameter("logging.debug_enabled").as_bool();
         throttle_duration = this->get_parameter("logging.throttle_duration").as_int();
@@ -255,6 +257,7 @@ private:
     void log_parameter_summary()
     {
         RCLCPP_INFO(this->get_logger(), "=== Ranger Server Parameter Summary ===");
+        RCLCPP_INFO(this->get_logger(), " CONTROL LOOP RATE: %.2f Hz", loop_rate);
         RCLCPP_INFO(this->get_logger(), "Follow Action:");
         RCLCPP_INFO(this->get_logger(), "  Default linear vel: %.2f m/s (max: %.2f m/s)", 
                    default_linear_vel, max_linear_vel_follow);
