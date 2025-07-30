@@ -47,6 +47,11 @@ ranger_server:
       max_lateral_vel: 0.5         # m/s - Maximum allowed lateral velocity
       # Timeout parameters
       strafe_timeout: 30.0
+      # Acceleration/Deceleration parameters
+      max_acceleration: 0.25       # m/s^2 - Maximum acceleration for strafe action
+      max_deceleration: 0.25       # m/s^2 - Maximum deceleration for strafe action
+      min_alignment_vel: 0.1       # m/s - Minimum velocity during alignment phase
+      alignment_decel_step: 0.025  # m/s - Deceleration step size during alignment phase
       # Alignment parameters
       alignment_tolerance: 0.01    # m - Tolerance for lateral alignment
 

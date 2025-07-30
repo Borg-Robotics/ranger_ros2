@@ -55,6 +55,10 @@ public:
       strafe_start_time(this->get_clock()->now()),
       strafe_alignment_phase(false),
       strafe_marker_detected(false),
+      current_strafe_velocity(0.0),
+      last_strafe_control_time(this->get_clock()->now()),
+      strafe_velocity_profile_initialized(false),
+      current_alignment_velocity(0.0),
       // Helper Variables
       marker_detected(false),
       distance_to_marker(-1.0),
@@ -171,6 +175,12 @@ private:
     bool strafe_marker_detected;
     geometry_msgs::msg::Pose strafe_marker_pose;
 
+    // Strafe velocity profile variables
+    double current_strafe_velocity;
+    rclcpp::Time last_strafe_control_time;
+    bool strafe_velocity_profile_initialized;
+    double current_alignment_velocity;
+
     // Marker state
     bool marker_detected;
     geometry_msgs::msg::Pose current_marker_pose;
@@ -208,6 +218,10 @@ private:
     double max_lateral_vel;
     double strafe_timeout;
     double strafe_alignment_tolerance;
+    double strafe_max_acceleration;
+    double strafe_max_deceleration;
+    double strafe_min_alignment_vel;
+    double strafe_alignment_decel_step;
     double loop_rate;
     double feedback_rate;
     bool debug_enabled;
@@ -254,7 +268,11 @@ private:
         this->declare_parameter("strafe_action.default_direction", 1);
         this->declare_parameter("strafe_action.max_lateral_vel", 1.0);
         this->declare_parameter("strafe_action.strafe_timeout", 30.0);
-        this->declare_parameter("strafe_action.alignment_tolerance", 0.05); //radians
+        this->declare_parameter("strafe_action.max_acceleration", 0.2);
+        this->declare_parameter("strafe_action.max_deceleration", 0.2);
+        this->declare_parameter("strafe_action.min_alignment_vel", 0.05);
+        this->declare_parameter("strafe_action.alignment_decel_step", 0.02);
+        this->declare_parameter("strafe_action.alignment_tolerance", 0.05); //m
         // Topic parameters
         this->declare_parameter("topics.aruco_markers", "/aruco_markers");
         this->declare_parameter("topics.cmd_vel", "/cmd_vel");
@@ -302,6 +320,10 @@ private:
         default_strafe_direction           = this->get_parameter("strafe_action.default_direction").as_int();
         max_lateral_vel            = this->get_parameter("strafe_action.max_lateral_vel").as_double();
         strafe_timeout             = this->get_parameter("strafe_action.strafe_timeout").as_double();
+        strafe_max_acceleration    = this->get_parameter("strafe_action.max_acceleration").as_double();
+        strafe_max_deceleration    = this->get_parameter("strafe_action.max_deceleration").as_double();
+        strafe_min_alignment_vel   = this->get_parameter("strafe_action.min_alignment_vel").as_double();
+        strafe_alignment_decel_step = this->get_parameter("strafe_action.alignment_decel_step").as_double();
         strafe_alignment_tolerance = this->get_parameter("strafe_action.alignment_tolerance").as_double();
         // Control Loop rate
         loop_rate         = this->get_parameter("control.loop_rate").as_double();
@@ -343,6 +365,10 @@ private:
         RCLCPP_INFO(this->get_logger(), "Strafe Action:");
         RCLCPP_INFO(this->get_logger(), "  Default lateral vel: %.2f m/s (max: %.2f m/s)", 
                    strafe_lateral_vel, max_lateral_vel);
+        RCLCPP_INFO(this->get_logger(), "  Max acceleration: %.2f m/s^2", strafe_max_acceleration);
+        RCLCPP_INFO(this->get_logger(), "  Max deceleration: %.2f m/s^2", strafe_max_deceleration);
+        RCLCPP_INFO(this->get_logger(), "  Min alignment velocity: %.2f m/s", strafe_min_alignment_vel);
+        RCLCPP_INFO(this->get_logger(), "  Alignment deceleration step: %.2f m/s", strafe_alignment_decel_step);
         RCLCPP_INFO(this->get_logger(), "  Strafe timeout: %.1f s", strafe_timeout);
         RCLCPP_INFO(this->get_logger(), "  Alignment tolerance: %.2f radians", strafe_alignment_tolerance);
         RCLCPP_INFO(this->get_logger(), "=========================================");
@@ -597,6 +623,11 @@ private:
         // Stop the robot
         stop_robot();
         strafe_active = false;
+        
+        // Reset velocity profile
+        current_strafe_velocity = 0.0;
+        strafe_velocity_profile_initialized = false;
+        current_alignment_velocity = 0.0;
 
         return rclcpp_action::CancelResponse::ACCEPT;
     }
@@ -639,6 +670,12 @@ private:
                 strafe_alignment_phase = false;
                 strafe_marker_detected = false;
                 strafe_start_time = this->get_clock()->now();
+                
+                // Initialize velocity profile
+                current_strafe_velocity = 0.0;
+                last_strafe_control_time = this->get_clock()->now();
+                strafe_velocity_profile_initialized = true;
+                
                 RCLCPP_INFO(this->get_logger(), "Strafe action started for marker ID: %ld | lateral_vel: %.2f | direction: %s",
                     strafe_marker_id, strafe_lateral_vel, (strafe_direction == 1) ? "left" : "right");
             } else {
@@ -743,8 +780,12 @@ private:
                     strafe_marker_pose = msg->poses[i];
                     last_marker_time = this->get_clock()->now();
                     
+                    // Initialize alignment velocity with current strafe velocity
+                    current_alignment_velocity = current_strafe_velocity;
+                    
                     RCLCPP_INFO(this->get_logger(), 
-                        "Found target marker %ld during strafe! Starting alignment phase.", strafe_marker_id);
+                        "Found target marker %ld during strafe! Starting alignment phase with velocity %.3f.", 
+                        strafe_marker_id, current_alignment_velocity);
                     return; // Continue in alignment phase
                 } else {
                     // ALIGNMENT PHASE: Update marker pose for alignment control
@@ -926,13 +967,6 @@ private:
         auto current_time = this->get_clock()->now();
         double elapsed_time = (current_time - strafe_start_time).seconds();
         
-        // Send strafe feedback with elapsed time (throttled)
-        if (should_publish_strafe_feedback()) {
-            strafe_feedback->current_lateral_vel = std::round(strafe_lateral_vel * strafe_direction * 1000.0f) / 1000.0f;
-            strafe_feedback->elapsed_time = elapsed_time;
-            current_strafe_goal_handle->publish_feedback(strafe_feedback);
-        }
-        
         // Check if we've exceeded the timeout using parameter value
         if (elapsed_time >= strafe_timeout) {
             RCLCPP_WARN(this->get_logger(), 
@@ -949,8 +983,15 @@ private:
             return;
         }
         
-        // Continue strafing
-        strafe_robot();
+        // Apply velocity profile with acceleration
+        apply_strafe_velocity_profile();
+        
+        // Send strafe feedback with elapsed time (throttled)
+        if (should_publish_strafe_feedback()) {
+            strafe_feedback->current_lateral_vel = std::round(current_strafe_velocity * strafe_direction * 1000.0f) / 1000.0f;
+            strafe_feedback->elapsed_time = elapsed_time;
+            current_strafe_goal_handle->publish_feedback(strafe_feedback);
+        }
     }
 
     void control_strafe_alignment()
@@ -972,7 +1013,7 @@ private:
             return;
         }
         
-        // Calculate angle to marker (alignment based on Y position)
+        // Calculate lateral offset to marker (alignment based on Y position)
         float lateral_offset = strafe_marker_pose.position.y;
         
         // Check if we are aligned within tolerance (marker is centered)
@@ -991,9 +1032,15 @@ private:
             return;
         }
 
-        // Continue strafing for fine alignment at slower speed
+        // Calculate target velocity based on distance to alignment tolerance
+        double target_velocity = calculate_strafe_alignment_velocity(lateral_offset);
+        
+        // Use the same direction as the original strafe movement
+        // No need to change direction based on offset - keep original strafe direction
+        
+        // Apply velocity with original direction
         auto twist_msg = geometry_msgs::msg::Twist();
-        twist_msg.linear.y = strafe_lateral_vel * strafe_direction * 0.5; // Slower speed for fine alignment
+        twist_msg.linear.y = target_velocity * strafe_direction;
         
         cmd_vel_publisher->publish(twist_msg);
 
@@ -1006,17 +1053,56 @@ private:
         
         if (debug_enabled) {
             RCLCPP_DEBUG(this->get_logger(), 
-                "Aligning: lateral_vel=%.2f, lateral_offset=%.3f",
-                twist_msg.linear.y, lateral_offset);
+                "Aligning: lateral_vel=%.2f, lateral_offset=%.3f, target_vel=%.2f",
+                twist_msg.linear.y, lateral_offset, target_velocity);
         }
     }
 
-    void strafe_robot()
+    void apply_strafe_velocity_profile()
     {
-        auto twist_msg = geometry_msgs::msg::Twist();
+        auto current_time = this->get_clock()->now();
         
-        // Set lateral velocity based on direction using strafe_lateral_vel
-        twist_msg.linear.y = strafe_lateral_vel * strafe_direction;
+        // Initialize time tracking if this is the first call
+        if (!strafe_velocity_profile_initialized) {
+            last_strafe_control_time = current_time;
+            current_strafe_velocity = 0.0;
+            strafe_velocity_profile_initialized = true;
+        }
+        
+        // Calculate time delta
+        double dt = (current_time - last_strafe_control_time).seconds();
+        last_strafe_control_time = current_time;
+        
+        // Skip if dt is too large (likely first iteration or system pause)
+        if (dt > 0.1) {
+            dt = 0.01; // Use small default dt
+        }
+        
+        // Calculate target velocity (default strafe velocity)
+        double target_velocity = strafe_lateral_vel;
+        
+        // Apply acceleration towards target velocity
+        double velocity_error = target_velocity - current_strafe_velocity;
+        
+        if (std::abs(velocity_error) > 0.001) { // Small threshold to avoid oscillation
+            if (velocity_error > 0) {
+                // Accelerate
+                current_strafe_velocity += strafe_max_acceleration * dt;
+                current_strafe_velocity = std::min(current_strafe_velocity, target_velocity);
+            } else {
+                // Decelerate (shouldn't happen in normal strafe phase, but good for safety)
+                current_strafe_velocity -= strafe_max_deceleration * dt;
+                current_strafe_velocity = std::max(current_strafe_velocity, target_velocity);
+            }
+        }
+        
+        // Ensure velocity doesn't exceed limits
+        current_strafe_velocity = std::min(current_strafe_velocity, max_lateral_vel);
+        current_strafe_velocity = std::max(current_strafe_velocity, 0.0);
+        
+        // Apply movement
+        auto twist_msg = geometry_msgs::msg::Twist();
+        twist_msg.linear.y = current_strafe_velocity * strafe_direction;
         
         // No other movement during strafe
         twist_msg.linear.x = 0.0;
@@ -1029,9 +1115,35 @@ private:
         
         if (debug_enabled) {
             RCLCPP_DEBUG(this->get_logger(), 
-                "Strafing: lateral_vel=%.2f, direction=%s", 
-                twist_msg.linear.y, (strafe_direction == 1) ? "left" : "right");
+                "Strafing with acceleration: current_vel=%.3f, target_vel=%.3f, direction=%s", 
+                current_strafe_velocity, target_velocity, (strafe_direction == 1) ? "left" : "right");
         }
+    }
+    
+    double calculate_strafe_alignment_velocity(float lateral_offset)
+    {
+        // Calculate absolute offset
+        double abs_offset = std::abs(lateral_offset);
+        
+        if (abs_offset <= strafe_alignment_tolerance) {
+            // Already within tolerance, stop
+            return 0.0;
+        }
+        
+        // Apply deceleration step during alignment phase
+        // Decelerate by step size but don't go below minimum velocity
+        current_alignment_velocity = std::max(
+            strafe_min_alignment_vel,
+            current_alignment_velocity - strafe_alignment_decel_step
+        );
+        
+        if (debug_enabled) {
+            RCLCPP_DEBUG(this->get_logger(), 
+                "Alignment deceleration: current_vel=%.3f, min_vel=%.3f, step=%.3f, offset=%.3f",
+                current_alignment_velocity, strafe_min_alignment_vel, strafe_alignment_decel_step, abs_offset);
+        }
+        
+        return current_alignment_velocity;
     }
 
     // Feedback throttling helper methods
