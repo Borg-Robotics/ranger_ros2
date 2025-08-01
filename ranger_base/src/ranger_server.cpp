@@ -451,8 +451,8 @@ private:
         min_distance     = goal->min_distance;
         
         // Optional parameters with defaults and safety limits
-        double requested_linear_vel  = (goal->linear_vel >= 0.0) ? goal->linear_vel : default_linear_vel;
-        double requested_angular_vel = (goal->angular_vel >= 0.0) ? goal->angular_vel : default_angular_vel;
+        double requested_linear_vel  = (goal->linear_vel > 0.0) ? goal->linear_vel : default_linear_vel;
+        double requested_angular_vel = (goal->angular_vel > 0.0) ? goal->angular_vel : default_angular_vel;
         
         // Enforce velocity limits with safety warnings
         linear_vel  = enforce_linear_velocity_limit(requested_linear_vel, "follow_aruco");
@@ -864,7 +864,7 @@ private:
         if (!follow_active || !current_follow_goal_handle) return;
         // Reset Velocity Profile
         if (!velocity_profile_initialized) {
-            velocity_profile_initialized = false;
+            velocity_profile_initialized = true;
             current_target_velocity     = 0.0;
             prev_linear_vel             = 0.0;
             prev_angular_vel            = 0.0;
