@@ -24,6 +24,7 @@ set(msg_file
 "msg/MotorState.msg"
 "msg/SystemState.msg"
 "msg/RCState.msg"
+"msg/SteeringAngle.msg"
 )
 
 set(srv_file

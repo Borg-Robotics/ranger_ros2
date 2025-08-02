@@ -49,7 +49,13 @@ add_executable(ranger_server
     src/ranger_server.cpp)
 ament_target_dependencies(ranger_server rclcpp rclcpp_action ranger_msgs ros2_aruco_interfaces geometry_msgs sensor_msgs tf2 tf2_geometry_msgs)
 
-install(TARGETS ranger_server
+# steering_angle_reader node
+add_executable(steering_angle_reader
+    src/steering_angle_reader.cpp)
+target_link_libraries(steering_angle_reader ugv_sdk)
+ament_target_dependencies(steering_angle_reader rclcpp std_msgs ranger_msgs ugv_sdk)
+
+install(TARGETS ranger_base_node ranger_server steering_angle_reader
   DESTINATION lib/${PROJECT_NAME})
 
 # launch files
