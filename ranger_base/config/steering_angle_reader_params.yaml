@@ -1,0 +1,27 @@
+# Configuration file for steering angle reader node
+# Reads CAN frame 0x271 (motor angles) and publishes steering angle
+
+steering_angle_reader:
+  ros__parameters:
+    # CAN interface settings
+    port_name: "can0"  # CAN port (can0, can1, etc.)
+    
+    # Robot model settings
+    robot_model: "ranger_mini_v2"  # ranger_mini_v1, ranger_mini_v2, ranger_mini_v3, ranger
+    
+    # Publishing rate
+    update_rate: 50  # Hz - Rate to publish steering angle data
+    
+    # Frame settings
+    frame_id: "base_link"  # Frame ID for the published data
+    
+    # Optional: Calibration offsets for individual wheels (in radians)
+    # These can be used to correct for mechanical offsets
+    calibration:
+      front_left_offset: 0.0
+      front_right_offset: 0.0
+      rear_left_offset: 0.0
+      rear_right_offset: 0.0
+    
+    # Debug settings
+    debug_output: false  # Enable detailed debug logging
