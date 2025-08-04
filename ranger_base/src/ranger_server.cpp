@@ -13,6 +13,7 @@
 #include <geometry_msgs/msg/pose.hpp>
 #include <tf2/utils.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <sensor_msgs/msg/imu.hpp>
 
 #include <ros2_aruco_interfaces/msg/aruco_markers.hpp>
 #include <ranger_msgs/action/aruco_follow.hpp>
@@ -48,6 +49,14 @@ public:
       search_marker_id(-1),
       search_active(false),
       search_start_time(this->get_clock()->now()),
+      // Search velocity profile variables
+      current_search_angular_velocity(0.0),
+      last_search_control_time(this->get_clock()->now()),
+      search_velocity_profile_initialized(false),
+      search_deceleration_phase(false),
+      // IMU variables
+      initial_quaternion_set(false),
+      current_rotation_angle(0.0),
       // Strafe Action Variables
       strafe_marker_id(-1),
       strafe_active(false),
@@ -105,12 +114,17 @@ public:
         // Create subscribers and publishers using parameters
         std::string aruco_topic   = this->get_parameter("topics.aruco_markers").as_string();
         std::string cmd_vel_topic = this->get_parameter("topics.cmd_vel").as_string();
+        std::string imu_topic     = this->get_parameter("topics.imu_data").as_string();
         
         aruco_subscriber = this->create_subscription<ros2_aruco_interfaces::msg::ArucoMarkers>(
             aruco_topic, 10,
             std::bind(&RangerServer::aruco_callback, this, std::placeholders::_1));
 
         cmd_vel_publisher = this->create_publisher<geometry_msgs::msg::Twist>(cmd_vel_topic, 10);
+        
+        imu_subscriber = this->create_subscription<sensor_msgs::msg::Imu>(
+            imu_topic, 10,
+            std::bind(&RangerServer::imu_callback, this, std::placeholders::_1));
 
         // Timer for control loop using parameter
         auto loop_period = std::chrono::milliseconds(static_cast<int>(1000.0 / loop_rate));
@@ -130,6 +144,7 @@ private:
 
     // Publishers and subscribers
     rclcpp::Subscription<ros2_aruco_interfaces::msg::ArucoMarkers>::SharedPtr aruco_subscriber;
+    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscriber;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_publisher;
     
     // Timer
@@ -159,11 +174,23 @@ private:
     int64_t search_marker_id;
     bool search_active;
     int64_t search_direction; 
-    float search_angular_vel;
+    double search_angular_vel;
     rclcpp::Time search_start_time;
     bool alignment_phase;
     bool alignment_marker_detected;
     geometry_msgs::msg::Pose alignment_marker_pose;
+
+    // Search velocity profile variables
+    double current_search_angular_velocity;
+    rclcpp::Time last_search_control_time;
+    bool search_velocity_profile_initialized;
+    bool search_deceleration_phase;
+
+    // IMU rotation tracking variables
+    bool initial_quaternion_set;
+    std::array<double, 4> initial_quaternion; // [x, y, z, w]
+    double initial_yaw;
+    double current_rotation_angle; // Current rotation angle in degrees
 
     // Strafe Action state variables
     int64_t strafe_marker_id;
@@ -211,6 +238,10 @@ private:
     double default_search_angular_vel;
     int default_search_direction;
     double search_alignment_tolerance;
+    double search_accel;
+    double search_decel;
+    double search_min_angular_vel;
+    double search_min_degree_for_decel;
     double strafe_vel;
     int default_strafe_direction;
     double strafe_max_vel;
@@ -261,6 +292,10 @@ private:
         this->declare_parameter("search_action.max_angular_vel", 2.0);
         this->declare_parameter("search_action.search_timeout", 60.0);
         this->declare_parameter("search_action.alignment_tolerance", 0.1); //radians
+        this->declare_parameter("search_action.accel", 0.2);
+        this->declare_parameter("search_action.decel", 0.2);
+        this->declare_parameter("search_action.min_angular_vel", 0.05);
+        this->declare_parameter("search_action.min_degree_for_decel", 30.0); //degrees
         // Strafe action parameters
         this->declare_parameter("strafe_action.default_vel", 0.5);
         this->declare_parameter("strafe_action.default_direction", 1);
@@ -274,6 +309,7 @@ private:
         // Topic parameters
         this->declare_parameter("topics.aruco_markers", "/aruco_markers");
         this->declare_parameter("topics.cmd_vel", "/cmd_vel");
+        this->declare_parameter("topics.imu_data", "/oak/imu/data");
         
         // Control parameters
         this->declare_parameter("control.loop_rate", 10.0);
@@ -313,6 +349,10 @@ private:
         max_angular_vel_search     = this->get_parameter("search_action.max_angular_vel").as_double();
         search_timeout             = this->get_parameter("search_action.search_timeout").as_double();
         search_alignment_tolerance = this->get_parameter("search_action.alignment_tolerance").as_double();
+        search_accel               = this->get_parameter("search_action.accel").as_double();
+        search_decel               = this->get_parameter("search_action.decel").as_double();
+        search_min_angular_vel     = this->get_parameter("search_action.min_angular_vel").as_double();
+        search_min_degree_for_decel = this->get_parameter("search_action.min_degree_for_decel").as_double();
         // Strafe action parameters
         strafe_vel                 = this->get_parameter("strafe_action.default_vel").as_double();
         default_strafe_direction   = this->get_parameter("strafe_action.default_direction").as_int();
@@ -572,6 +612,16 @@ private:
                 alignment_phase           = false;
                 alignment_marker_detected = false;
                 search_start_time  = this->get_clock()->now();
+                
+                // Reset search velocity profile
+                search_velocity_profile_initialized = false;
+                current_search_angular_velocity = 0.0;
+                search_deceleration_phase = false;
+                
+                // Reset IMU tracking for this search action
+                initial_quaternion_set = false;
+                current_rotation_angle = 0.0;
+                
                 RCLCPP_INFO(this->get_logger(), 
                     "Starting to search for marker ID: %ld | angular_vel: %.2f | direction: %s",
                     search_marker_id, search_angular_vel, (search_direction == 1) ? "counter-clockwise" : "clockwise");
@@ -787,6 +837,68 @@ private:
         }
     }
 
+    // IMU callback for rotation tracking
+    void imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg)
+    {
+        // Extract quaternion
+        double qx = msg->orientation.x;
+        double qy = msg->orientation.y;
+        double qz = msg->orientation.z;
+        double qw = msg->orientation.w;
+        
+        std::array<double, 4> current_quaternion = {qx, qy, qz, qw};
+        
+        // Convert to Euler angles to get current yaw
+        double roll, pitch, yaw;
+        quaternion_to_euler(qx, qy, qz, qw, roll, pitch, yaw);
+        
+        // Store initial orientation on first message
+        if (!initial_quaternion_set) {
+            initial_quaternion = current_quaternion;
+            initial_yaw = yaw;
+            initial_quaternion_set = true;
+            current_rotation_angle = 0.0;
+            RCLCPP_INFO(this->get_logger(), "Initial IMU orientation set - Yaw: %.2f°", 
+                        yaw * 180.0 / M_PI);
+            return;
+        }
+        
+        // Calculate rotation angle from initial position
+        double yaw_diff = normalize_angle(yaw - initial_yaw);
+        current_rotation_angle = yaw_diff * 180.0 / M_PI; // Convert to degrees
+    }
+
+    // Utility methods for quaternion and angle operations
+    void quaternion_to_euler(double x, double y, double z, double w, 
+                            double& roll, double& pitch, double& yaw)
+    {
+        // Roll (x-axis rotation)
+        double sinr_cosp = 2 * (w * x + y * z);
+        double cosr_cosp = 1 - 2 * (x * x + y * y);
+        roll = std::atan2(sinr_cosp, cosr_cosp);
+
+        // Pitch (y-axis rotation)
+        double sinp = 2 * (w * y - z * x);
+        if (std::abs(sinp) >= 1)
+            pitch = std::copysign(M_PI / 2, sinp); // Use 90 degrees if out of range
+        else
+            pitch = std::asin(sinp);
+
+        // Yaw (z-axis rotation)
+        double siny_cosp = 2 * (w * z + x * y);
+        double cosy_cosp = 1 - 2 * (y * y + z * z);
+        yaw = std::atan2(siny_cosp, cosy_cosp);
+    }
+
+    double normalize_angle(double angle)
+    {
+        while (angle > M_PI)
+            angle -= 2 * M_PI;
+        while (angle < -M_PI)
+            angle += 2 * M_PI;
+        return angle;
+    }
+
     void control_search_alignment(){
         // calculate angle to marker
         float angle_to_marker = std::atan2(
@@ -908,7 +1020,7 @@ private:
         // Send search feedback with elapsed time (throttled)
         if (should_publish_search_feedback()) {
             search_feedback->elapsed_time = elapsed_time;  // This field now represents elapsed time in seconds
-            search_feedback->curr_angular_vel = std::round(search_angular_vel * search_direction * 1000.0f) / 1000.0f;
+            search_feedback->curr_angular_vel = std::round(current_search_angular_velocity * search_direction * 1000.0f) / 1000.0f;
             current_search_goal_handle->publish_feedback(search_feedback);
         }
         
@@ -928,8 +1040,8 @@ private:
             return;
         }
         
-        // Continue rotating
-        rotate_robot();
+        // Apply trapezoidal velocity profile for rotation
+        apply_search_velocity_profile();
     }
 
     void control_strafe_action()
@@ -1091,6 +1203,79 @@ private:
                 current_strafe_velocity, target_velocity, lateral_offset, 
                 strafe_deceleration_phase ? "true" : "false", 
                 (strafe_direction == 1) ? "left" : "right");
+        }
+    }
+
+    void apply_search_velocity_profile()
+    {
+        auto current_time = this->get_clock()->now();
+        
+        // Initialize time tracking if this is the first call
+        if (!search_velocity_profile_initialized) {
+            last_search_control_time = current_time;
+            current_search_angular_velocity = 0.0;
+            search_deceleration_phase = false;
+            search_velocity_profile_initialized = true;
+        }
+        
+        // Calculate time delta
+        double dt = (current_time - last_search_control_time).seconds();
+        last_search_control_time = current_time;
+        
+        // Skip if dt is too large (likely first iteration or system pause)
+        if (dt > 0.1) {
+            dt = 0.01; // Use small default dt
+        }
+        
+        // Determine target velocity based on trapezoidal profile
+        double target_velocity = 0.0;
+        
+        // Get current rotation angle (absolute value for comparison)
+        double abs_rotation_angle = std::abs(current_rotation_angle);
+        
+        if (abs_rotation_angle < search_min_degree_for_decel) {
+            // Phase 1 & 2: Acceleration/Constant velocity phase
+            // Accelerate to or maintain default angular velocity
+            target_velocity = search_angular_vel;
+            search_deceleration_phase = false;
+        } else {
+            // Phase 3: Deceleration phase
+            // Once we reach the deceleration threshold, start decelerating to minimum velocity
+            search_deceleration_phase = true;
+            target_velocity = search_min_angular_vel;
+        }
+        
+        // Apply acceleration/deceleration towards target velocity
+        double velocity_error = target_velocity - current_search_angular_velocity;
+        
+        if (std::abs(velocity_error) > 0.001) { // Small threshold to avoid oscillation
+            if (velocity_error > 0) {
+                // Accelerate
+                current_search_angular_velocity += search_accel * dt;
+                current_search_angular_velocity = std::min(current_search_angular_velocity, target_velocity);
+            } else {
+                // Decelerate
+                current_search_angular_velocity -= search_decel * dt;
+                current_search_angular_velocity = std::max(current_search_angular_velocity, target_velocity);
+            }
+        }
+        
+        // Ensure velocity doesn't exceed limits
+        current_search_angular_velocity = std::min(current_search_angular_velocity, search_angular_vel);
+        current_search_angular_velocity = std::max(current_search_angular_velocity, 0.0);
+        
+        // Apply rotation
+        auto twist_msg = geometry_msgs::msg::Twist();
+        twist_msg.angular.z = current_search_angular_velocity * search_direction;
+        
+        cmd_vel_publisher->publish(twist_msg);
+        
+        if (debug_enabled) {
+            RCLCPP_DEBUG(this->get_logger(), 
+                "Search trapezoidal profile: current_vel=%.3f, target_vel=%.3f, rotation=%.1f°, decel_threshold=%.1f°, phase=%s, direction=%s", 
+                current_search_angular_velocity, target_velocity, current_rotation_angle, search_min_degree_for_decel,
+                search_deceleration_phase ? "decel" : "accel/const", 
+                (search_direction == 1) ? "ccw" : "cw");
         }
     }
 

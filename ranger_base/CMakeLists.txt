@@ -47,7 +47,7 @@ install(TARGETS ranger_base_node
 # ranger_server node
 add_executable(ranger_server
     src/ranger_server.cpp)
-ament_target_dependencies(ranger_server rclcpp rclcpp_action ranger_msgs ros2_aruco_interfaces geometry_msgs tf2 tf2_geometry_msgs)
+ament_target_dependencies(ranger_server rclcpp rclcpp_action ranger_msgs ros2_aruco_interfaces geometry_msgs sensor_msgs tf2 tf2_geometry_msgs)
 
 install(TARGETS ranger_server
   DESTINATION lib/${PROJECT_NAME})

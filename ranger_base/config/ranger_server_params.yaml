@@ -38,6 +38,11 @@ ranger_server:
       search_timeout: 30.0        # s - Maximum time to search for marker
       # Alignment parameters
       alignment_tolerance: 0.01    # rad - Tolerance for alignment phase (0.57 degrees)
+      # Trapezoidal velocity profile parameters
+      accel: 0.3                  # rad/s^2 - Maximum acceleration for search action
+      decel: 0.75                 # rad/s^2 - Maximum deceleration for search action
+      min_angular_vel: 0.05       # rad/s - Minimum angular velocity during search
+      min_degree_for_decel: 140.0  # degrees - Minimum rotation angle to start deceleration
 
     strafe_action:
       # Default velocity
@@ -59,6 +64,7 @@ ranger_server:
     topics:
       aruco_markers: "/aruco_markers"  # ArUco markers topic
       cmd_vel: "/cmd_vel"              # Velocity command topic
+      imu_data: "/oak/imu/data"        # IMU data topic for rotation tracking
       
     # Control loop parameters
     control:
