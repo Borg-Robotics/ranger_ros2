@@ -30,18 +30,18 @@ ranger_server:
     
     search_action:
       # Default velocity parameters
-      default_angular_vel: 0.2    # rad/s - Default angular velocity for search action
-      default_direction: 1        # 1 for counter-clockwise, -1 for clockwise
+      default_angular_vel: 1.0     # rad/s - Default angular velocity for search action
+      default_direction: 1         # 1 for counter-clockwise, -1 for clockwise
       # Maximum velocity limits (safety parameters)
-      max_angular_vel: 0.3        # rad/s - Maximum allowed angular velocity for search
+      max_angular_vel: 1.2         # rad/s - Maximum allowed angular velocity for search
       # Timeout parameters
-      search_timeout: 30.0        # s - Maximum time to search for marker
+      search_timeout: 30.0         # s - Maximum time to search for marker
       # Alignment parameters
       alignment_tolerance: 0.01    # rad - Tolerance for alignment phase (0.57 degrees)
       # Trapezoidal velocity profile parameters
-      accel: 0.3                  # rad/s^2 - Maximum acceleration for search action
-      decel: 0.75                 # rad/s^2 - Maximum deceleration for search action
-      min_angular_vel: 0.05       # rad/s - Minimum angular velocity during search
+      accel: 0.75                  # rad/s^2 - Maximum acceleration for search action
+      decel: 1.0                  # rad/s^2 - Maximum deceleration for search action
+      min_angular_vel: 0.05        # rad/s - Minimum angular velocity during search
       min_degree_for_decel: 140.0  # degrees - Minimum rotation angle to start deceleration
 
     strafe_action:
@@ -73,5 +73,5 @@ ranger_server:
       
     # Logging parameters
     logging:
-      debug_enabled: false        # Enable debug logging
+      debug_enabled: true        # Enable debug logging
       throttle_duration: 2000     # ms - Duration for throttled warnings
