@@ -11,6 +11,7 @@
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <geometry_msgs/msg/pose.hpp>
+#include <std_msgs/msg/float64.hpp>
 #include <tf2/utils.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <sensor_msgs/msg/imu.hpp>
@@ -57,6 +58,7 @@ public:
       // IMU variables
       initial_quaternion_set(false),
       current_rotation_angle(0.0),
+      cumulative_rotation(0.0),
       // Strafe Action Variables
       strafe_marker_id(-1),
       strafe_active(false),
@@ -126,6 +128,13 @@ public:
             imu_topic, 10,
             std::bind(&RangerServer::imu_callback, this, std::placeholders::_1));
 
+        // Create debug publisher for rotation angle after parameters are loaded
+        if (debug_enabled) {
+            rotation_angle_debug_publisher = this->create_publisher<std_msgs::msg::Float64>(
+                "/ranger_server/debug/rotation_angle", 10);
+            RCLCPP_INFO(this->get_logger(), "Debug publisher for rotation angle created on topic: /ranger_server/debug/rotation_angle");
+        }
+
         // Timer for control loop using parameter
         auto loop_period = std::chrono::milliseconds(static_cast<int>(1000.0 / loop_rate));
         control_timer = this->create_wall_timer(
@@ -146,6 +155,7 @@ private:
     rclcpp::Subscription<ros2_aruco_interfaces::msg::ArucoMarkers>::SharedPtr aruco_subscriber;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscriber;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_publisher;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr rotation_angle_debug_publisher;
     
     // Timer
     rclcpp::TimerBase::SharedPtr control_timer;
@@ -176,7 +186,6 @@ private:
     int64_t search_direction; 
     double search_angular_vel;
     rclcpp::Time search_start_time;
-    bool alignment_phase;
     bool alignment_marker_detected;
     geometry_msgs::msg::Pose alignment_marker_pose;
 
@@ -191,6 +200,7 @@ private:
     std::array<double, 4> initial_quaternion; // [x, y, z, w]
     double initial_yaw;
     double current_rotation_angle; // Current rotation angle in degrees
+    double cumulative_rotation; // Cumulative rotation tracking (unbounded)
 
     // Strafe Action state variables
     int64_t strafe_marker_id;
@@ -568,7 +578,6 @@ private:
         // Stop the robot
         stop_robot();
         search_active             = false;
-        alignment_phase           = false;
         alignment_marker_detected = false;
 
         return rclcpp_action::CancelResponse::ACCEPT;
@@ -609,7 +618,6 @@ private:
             if(check_aruco_topic_availability()){
                 search_active             = true;
                 marker_detected           = false;
-                alignment_phase           = false;
                 alignment_marker_detected = false;
                 search_start_time  = this->get_clock()->now();
                 
@@ -621,6 +629,7 @@ private:
                 // Reset IMU tracking for this search action
                 initial_quaternion_set = false;
                 current_rotation_angle = 0.0;
+                cumulative_rotation = 0.0;
                 
                 RCLCPP_INFO(this->get_logger(), 
                     "Starting to search for marker ID: %ld | angular_vel: %.2f | direction: %s",
@@ -791,31 +800,19 @@ private:
             
             // Check for search action
             if (search_active && msg->marker_ids[i] == search_marker_id) {
-                if(!alignment_phase) {
-                // SEARCH PHASE: Marker found for the first time
-                marker_detected           = true;
+                // Marker found - update detection status and pose for alignment check
+                marker_detected = true;
                 alignment_marker_detected = true;
-                alignment_phase           = true;
                 alignment_marker_pose = msg->poses[i];
                 last_marker_time = this->get_clock()->now();
                 
                 RCLCPP_INFO(this->get_logger(), 
-                    "Found target marker %ld during search! Starting alignment phase.", search_marker_id);
-                return; // Continue in alignment phase
-                } else {
-                    // ALIGNMENT PHASE: Update marker pose for alignment control
-                    alignment_marker_detected = true;
-                    alignment_marker_pose     = msg->poses[i];
-                    if(debug_enabled){
-                        RCLCPP_DEBUG(this->get_logger(), 
-                            "Alignment phase: Detected marker %ld at position (%.2f, %.2f, %.2f)", 
-                            search_marker_id,
-                            alignment_marker_pose.position.x,
-                            alignment_marker_pose.position.y,
-                            alignment_marker_pose.position.z);
-                    }
-                    return;
-                }
+                    "Found target marker %ld during search at position (%.2f, %.2f, %.2f)", 
+                    search_marker_id,
+                    alignment_marker_pose.position.x,
+                    alignment_marker_pose.position.y,
+                    alignment_marker_pose.position.z);
+                return;
             }
             // Check for strafe action
             if (strafe_active && msg->marker_ids[i] == strafe_marker_id) {
@@ -858,14 +855,31 @@ private:
             initial_yaw = yaw;
             initial_quaternion_set = true;
             current_rotation_angle = 0.0;
+            cumulative_rotation = 0.0;
             RCLCPP_INFO(this->get_logger(), "Initial IMU orientation set - Yaw: %.2f°", 
                         yaw * 180.0 / M_PI);
             return;
         }
         
-        // Calculate rotation angle from initial position
-        double yaw_diff = normalize_angle(yaw - initial_yaw);
-        current_rotation_angle = yaw_diff * 180.0 / M_PI; // Convert to degrees
+        // Calculate relative rotation using quaternion method
+        std::array<double, 4> initial_conj = quaternion_conjugate(initial_quaternion);
+        std::array<double, 4> relative_q = quaternion_multiply(current_quaternion, initial_conj);
+        
+        // Convert relative quaternion to Euler to get relative yaw
+        double rel_roll, rel_pitch, rel_yaw;
+        quaternion_to_euler(relative_q[0], relative_q[1], relative_q[2], relative_q[3], 
+                           rel_roll, rel_pitch, rel_yaw);
+        
+        // Normalize relative yaw and convert to degrees
+        rel_yaw = normalize_angle(rel_yaw);
+        current_rotation_angle = rel_yaw * 180.0 / M_PI;
+        
+        // Publish debug information if enabled and publisher exists
+        if (debug_enabled && rotation_angle_debug_publisher) {
+            auto debug_msg = std_msgs::msg::Float64();
+            debug_msg.data = current_rotation_angle;
+            rotation_angle_debug_publisher->publish(debug_msg);
+        }
     }
 
     // Utility methods for quaternion and angle operations
@@ -899,45 +913,24 @@ private:
         return angle;
     }
 
-    void control_search_alignment(){
-        // calculate angle to marker
-        float angle_to_marker = std::atan2(
-            alignment_marker_pose.position.y, 
-            alignment_marker_pose.position.x
-        );
+    // Quaternion multiplication
+    std::array<double, 4> quaternion_multiply(const std::array<double, 4>& q1, const std::array<double, 4>& q2)
+    {
+        double x1 = q1[0], y1 = q1[1], z1 = q1[2], w1 = q1[3];
+        double x2 = q2[0], y2 = q2[1], z2 = q2[2], w2 = q2[3];
+        
+        double w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2;
+        double x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2;
+        double y = w1 * y2 + y1 * w2 + z1 * x2 - x1 * z2;
+        double z = w1 * z2 + z1 * w2 + x1 * y2 - y1 * x2;
+        
+        return {x, y, z, w};
+    }
 
-        // Check if we are aligned withen tolerance
-        if (std::abs(angle_to_marker) <= search_alignment_tolerance) {
-            RCLCPP_INFO(this->get_logger(), 
-                "Aligned with marker %ld within tolerance (%.2f radians). Stopping search action.", 
-                search_marker_id, search_alignment_tolerance);
-            
-            stop_robot();
-            
-            // Send success result
-            search_result->success = true;
-            search_result->message = "Successfully aligned with marker " + std::to_string(search_marker_id);
-            current_search_goal_handle->succeed(search_result);
-            search_active = false;
-            return;
-        }
-
-        // Continue  alignment rotation at slower speed
-        auto twist_msg      = geometry_msgs::msg::Twist();
-        twist_msg.angular.z = search_angular_vel * search_direction * 0.5; 
-        cmd_vel_publisher->publish(twist_msg);
-
-        // Update feedback (throttled)
-        if (should_publish_search_feedback()) {
-            search_feedback->curr_angular_vel = std::round(twist_msg.angular.z * 1000.0f) / 1000.0f;
-            search_feedback->elapsed_time     = (this->get_clock()->now() - search_start_time).seconds();
-            current_search_goal_handle->publish_feedback(search_feedback);
-        }
-        if (debug_enabled) {
-        RCLCPP_DEBUG(this->get_logger(), 
-            "Aligning: angular=%.2f, angle_to_marker=%.3f rad (%.1f deg)",
-            twist_msg.angular.z, angle_to_marker, angle_to_marker * 180.0 / M_PI);
-        }
+    // Quaternion conjugate
+    std::array<double, 4> quaternion_conjugate(const std::array<double, 4>& q)
+    {
+        return {-q[0], -q[1], -q[2], q[3]};
     }
 
     void control_loop()
@@ -1007,12 +1000,6 @@ private:
 
     void control_search_action()
     { 
-        // Alignment phase
-        if(alignment_phase) {
-            control_search_alignment();
-            return;
-        }
-        // Search phase
         // Calculate elapsed time since search started
         auto current_time = this->get_clock()->now();
         double elapsed_time = (current_time - search_start_time).seconds();
@@ -1040,7 +1027,7 @@ private:
             return;
         }
         
-        // Apply trapezoidal velocity profile for rotation
+        // Apply trapezoidal velocity profile for rotation (includes alignment checking)
         apply_search_velocity_profile();
     }
 
@@ -1225,6 +1212,31 @@ private:
         // Skip if dt is too large (likely first iteration or system pause)
         if (dt > 0.1) {
             dt = 0.01; // Use small default dt
+        }
+        
+        // Check if marker is detected and we're aligned within tolerance
+        if (marker_detected && alignment_marker_detected) {
+            // Calculate angle to marker for alignment check
+            float angle_to_marker = std::atan2(
+                alignment_marker_pose.position.y, 
+                alignment_marker_pose.position.x
+            );
+            
+            // Check if we are aligned within tolerance
+            if (std::abs(angle_to_marker) <= search_alignment_tolerance) {
+                RCLCPP_INFO(this->get_logger(), 
+                    "Aligned with marker %ld within tolerance (%.3f radians). Stopping search action.", 
+                    search_marker_id, search_alignment_tolerance);
+                
+                stop_robot();
+                
+                // Send success result
+                search_result->success = true;
+                search_result->message = "Successfully aligned with marker " + std::to_string(search_marker_id);
+                current_search_goal_handle->succeed(search_result);
+                search_active = false;
+                return;
+            }
         }
         
         // Determine target velocity based on trapezoidal profile
