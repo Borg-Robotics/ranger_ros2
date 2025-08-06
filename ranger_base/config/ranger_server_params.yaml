@@ -37,11 +37,11 @@ ranger_server:
       # Timeout parameters
       search_timeout: 30.0         # s - Maximum time to search for marker
       # Alignment parameters
-      alignment_tolerance: 0.01    # rad - Tolerance for alignment phase (0.57 degrees)
+      alignment_tolerance: 0.02    # rad - Tolerance for alignment phase (0.57 degrees)
       # Trapezoidal velocity profile parameters
-      accel: 0.75                  # rad/s^2 - Maximum acceleration for search action
-      decel: 1.0                  # rad/s^2 - Maximum deceleration for search action
-      min_angular_vel: 0.05        # rad/s - Minimum angular velocity during search
+      accel: 1.0                  # rad/s^2 - Maximum acceleration for search action
+      decel: 1.2                  # rad/s^2 - Maximum deceleration for search action
+      min_angular_vel: 0.175        # rad/s - Minimum angular velocity during search
       min_degree_for_decel: 140.0  # degrees - Minimum rotation angle to start deceleration
 
     strafe_action:
@@ -59,6 +59,7 @@ ranger_server:
       # Alignment parameters
       alignment_tolerance: 0.05    # m - Tolerance for lateral alignment
       min_offset_for_decel: 0.3    # m - Minimum lateral offset to start deceleration
+      alignment_offset: 0.075        # m - Additional offset to continue strafing after alignment (0 = stop at alignment tolerance)
 
     # Topic and frame parameters
     topics:

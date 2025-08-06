@@ -261,6 +261,7 @@ private:
     double strafe_decel;
     double strafe_min_vel;
     double strafe_min_offset_for_decel;
+    double strafe_alignment_offset;
     double loop_rate;
     double feedback_rate;
     bool debug_enabled;
@@ -316,6 +317,7 @@ private:
         this->declare_parameter("strafe_action.min_vel", 0.05);
         this->declare_parameter("strafe_action.alignment_tolerance", 0.05); //m
         this->declare_parameter("strafe_action.min_offset_for_decel", 0.2); //m
+        this->declare_parameter("strafe_action.alignment_offset", 0.0); //m
         // Topic parameters
         this->declare_parameter("topics.aruco_markers", "/aruco_markers");
         this->declare_parameter("topics.cmd_vel", "/cmd_vel");
@@ -373,6 +375,7 @@ private:
         strafe_min_vel             = this->get_parameter("strafe_action.min_vel").as_double();
         strafe_alignment_tolerance  = this->get_parameter("strafe_action.alignment_tolerance").as_double();
         strafe_min_offset_for_decel = this->get_parameter("strafe_action.min_offset_for_decel").as_double();
+        strafe_alignment_offset     = this->get_parameter("strafe_action.alignment_offset").as_double();
         // Control Loop rate
         loop_rate         = this->get_parameter("control.loop_rate").as_double();
         feedback_rate     = this->get_parameter("control.feedback_rate").as_double();
@@ -419,6 +422,7 @@ private:
         RCLCPP_INFO(this->get_logger(), "  Min offset for deceleration: %.2f m", strafe_min_offset_for_decel);
         RCLCPP_INFO(this->get_logger(), "  Strafe timeout: %.1f s", strafe_timeout);
         RCLCPP_INFO(this->get_logger(), "  Alignment tolerance: %.2f m", strafe_alignment_tolerance);
+        RCLCPP_INFO(this->get_logger(), "  Alignment offset: %.2f m", strafe_alignment_offset);
         RCLCPP_INFO(this->get_logger(), "=========================================");
     }
     
@@ -1058,13 +1062,14 @@ private:
         // Apply trapezoidal velocity profile
         apply_strafe_velocity_profile();
         
-        // Check if we've reached alignment tolerance
+        // Check if we've reached alignment tolerance plus offset
         if (strafe_marker_detected) {
             float lateral_offset = std::abs(strafe_marker_pose.position.y);
-            if (lateral_offset <= strafe_alignment_tolerance) {
+            float target_alignment = strafe_alignment_tolerance + strafe_alignment_offset;
+            if (lateral_offset <= target_alignment) {
                 RCLCPP_INFO(this->get_logger(), 
-                    "Aligned with marker %ld within tolerance (%.3fm). Action completed.", 
-                    strafe_marker_id, strafe_alignment_tolerance);
+                    "Aligned with marker %ld within tolerance + offset (%.3fm + %.3fm = %.3fm). Action completed.", 
+                    strafe_marker_id, strafe_alignment_tolerance, strafe_alignment_offset, target_alignment);
                 
                 stop_robot();
                 
@@ -1126,9 +1131,10 @@ private:
                 // Phase 3: Deceleration phase - linearly reduce velocity based on remaining distance
                 strafe_deceleration_phase = true;
                 
-                // Calculate remaining distance to tolerance
-                double remaining_distance = lateral_offset - strafe_alignment_tolerance;
-                double decel_range = strafe_min_offset_for_decel - strafe_alignment_tolerance;
+                // Calculate remaining distance to tolerance + offset
+                double target_alignment = strafe_alignment_tolerance + strafe_alignment_offset;
+                double remaining_distance = lateral_offset - target_alignment;
+                double decel_range = strafe_min_offset_for_decel - target_alignment;
                 
                 if (remaining_distance <= 0) {
                     // Within tolerance - stop
