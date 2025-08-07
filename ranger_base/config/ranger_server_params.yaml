@@ -8,23 +8,20 @@ ranger_server:
     # Action Server Parameters
     follow_action:
       # Default velocity parameters
-      default_linear_vel: 0.5    # m/s - Default linear velocity for follow action
+      default_linear_vel: 0.65    # m/s - Default linear velocity for follow action
       default_angular_vel: 0.15   # rad/s - Default angular velocity for follow action
       # Maximum velocity limits (safety parameters)
       max_linear_vel: 0.75         # m/s - Maximum allowed linear velocity
-      max_angular_vel: 0.3        # rad/s - Maximum allowed angular velocity
+      max_angular_vel: 0.3         # rad/s - Maximum allowed angular velocity
       # Control parameters
       marker_timeout: 2.0         # s - Timeout for marker detection loss 
       # Smoothing parameters
       angular_gain: 1.0          # Proportional gain for angular control
       # Trapezoidal velocity profile parameters
-      max_acceleration: 0.25       # m/s^2 - Maximum acceleration
-      max_deceleration: 0.25       # m/s^2 - Maximum deceleration
-      min_linear_vel_threshold: 0.05
-      min_angular_vel_threshold: 0.0 
-      deceleration_step_size: 0.02  # m/s - Step size for deceleration
-      deceleration_distance_threshold: 1.0  # m - Distance threshold for deceleration to use min_deceleration_velocity
-      min_deceleration_velocity: 0.1 # m/s^2 - Minimum deceleration at deceleration distance threshold
+      accel: 0.5                # m/s^2 - Maximum acceleration
+      decel: 0.6                # m/s^2 - Maximum deceleration
+      min_dist_for_decel: 0.55  # m - Distance threshold to start deceleration
+      min_linear_vel: 0.05      # m/s - Minimum linear velocity during deceleration phase
       # Alignment parameters
       alignment_tolerance: 0.01     # rad - Tolerance for alignment [Dead-Zone] (0.57 degrees)
     
@@ -37,10 +34,10 @@ ranger_server:
       # Timeout parameters
       search_timeout: 30.0         # s - Maximum time to search for marker
       # Alignment parameters
-      alignment_tolerance: 0.02    # rad - Tolerance for alignment phase (0.57 degrees)
+      alignment_tolerance: 0.01    # rad - Tolerance for alignment phase (0.57 degrees)
       # Trapezoidal velocity profile parameters
       accel: 1.0                  # rad/s^2 - Maximum acceleration for search action
-      decel: 1.2                  # rad/s^2 - Maximum deceleration for search action
+      decel: 1.0                  # rad/s^2 - Maximum deceleration for search action
       min_angular_vel: 0.175        # rad/s - Minimum angular velocity during search
       min_degree_for_decel: 140.0  # degrees - Minimum rotation angle to start deceleration
 
