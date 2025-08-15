@@ -88,6 +88,39 @@ This repository is a fork of [agilexrobotics/ranger_ros2](https://github.com/agi
           - Continuous alignment correction during movement
           - Maintains specified distance while tracking marker movement
 
+    3. **`/strafe_aruco`**: The robot strafes laterally to align with the ArUco marker while maintaining forward orientation.
+        ```shell
+            ros2 action send_goal /strafe_aruco ranger_msgs/action/ArucoStrafe "{marker_id: 1, lateral_vel: 0.4, direction: 1}" -f
+        ``` 
+        - **Parameters:**
+          - `marker_id` (required): ArUco marker ID to strafe toward
+          - `lateral_vel` (optional): Maximum lateral velocity (default: 0.4 m/s)
+          - `direction` (optional): Strafe direction
+            - `1` → strafe left [default]
+            - `-1` → strafe right
+        - **Behavior:**
+          - Lateral movement with trapezoidal velocity profile
+          - Maintains forward orientation while strafing
+          - Automatically stops when aligned within tolerance
+          - Smooth acceleration and deceleration phases
+
+    4. **`/turn_around`**: The robot performs a precise 180-degree turn using IMU feedback for accurate rotation control.
+        ```shell
+            ros2 action send_goal /turn_around ranger_msgs/action/TurnAround "{angular_vel: 1.0, direction: 1}" -f
+        ``` 
+        - **Parameters:**
+          - `angular_vel` (optional): Maximum angular velocity during turn (default: 1.0 rad/s)
+          - `direction` (optional): Turn direction
+            - `1` → counter-clockwise rotation [default]
+            - `-1` → clockwise rotation
+        - **Behavior:**
+          - Precise 180-degree rotation using IMU feedback
+          - Trapezoidal velocity profile for smooth motion
+          - Acceleration phase until reaching maximum velocity
+          - Constant velocity phase for efficient rotation
+          - Deceleration phase when approaching 140° (configurable)
+          - Automatic stop at exactly 180 degrees with wraparound handling
+
 ## Configuration Tips
 
 ### 🔧 **Tuning for Different Environments**
@@ -171,6 +204,17 @@ The ranger_server parameters have been significantly enhanced to support advance
 | `search_action.search_timeout` | double | 60.0 | Maximum time to search for marker (s) |
 | `search_action.alignment_tolerance` | double | 0.01 | Tolerance for alignment phase (rad, ~0.57°) |
 
+##### TurnAround Action Parameters
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `turn_around_action.default_angular_vel` | double | 1.0 | Default angular velocity for turn around action (rad/s) |
+| `turn_around_action.default_direction` | int | 1 | Default turn direction (1: counter-clockwise, -1: clockwise) |
+| `turn_around_action.max_angular_vel` | double | 1.2 | Maximum allowed angular velocity for turn around (rad/s) |
+| `turn_around_action.accel` | double | 1.0 | Maximum acceleration for turn around action (rad/s²) |
+| `turn_around_action.decel` | double | 1.0 | Maximum deceleration for turn around action (rad/s²) |
+| `turn_around_action.min_angular_vel` | double | 0.2 | Minimum angular velocity during turn around (rad/s) |
+| `turn_around_action.min_degree_for_decel` | double | 140.0 | Minimum rotation angle to start deceleration (degrees) |
+
 ##### System Parameters
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -231,6 +275,35 @@ The ranger_server parameters have been significantly enhanced to support advance
     - Search progress and current rotation angle
     - Marker detection status
     - Alignment phase progress
+
+* **`/strafe_aruco`** (`ranger_msgs::action::ArucoStrafe`)
+  - **Goal Fields:**
+    - `int64 marker_id` - Target ArUco marker ID to strafe toward (required)
+    - `float32 lateral_vel` - Maximum lateral velocity (optional, uses default if ≤ 0)
+    - `int64 direction` - Strafe direction: 1 for left, -1 for right (optional)
+  - **Features:**
+    - Lateral movement with trapezoidal velocity profile
+    - Maintains forward orientation while strafing
+    - Automatic alignment with marker position
+    - Timeout protection with configurable duration
+  - **Feedback:**
+    - Current lateral velocity
+    - Marker detection and alignment status
+
+* **`/turn_around`** (`ranger_msgs::action::TurnAround`)
+  - **Goal Fields:**
+    - `float32 angular_vel` - Maximum angular velocity during turn (optional, uses default if ≤ 0)
+    - `int64 direction` - Turn direction: 1 for counter-clockwise, -1 for clockwise (optional)
+  - **Features:**
+    - Precise 180-degree rotation using IMU feedback
+    - Trapezoidal velocity profile for smooth motion
+    - Independent of ArUco marker detection
+    - Automatic stop with angle wraparound handling
+    - Configurable acceleration and deceleration phases
+  - **Feedback:**
+    - Current angular velocity
+    - Real-time rotation progress
+
 ### Debug Mode
 
 Enable detailed logging for troubleshooting:
