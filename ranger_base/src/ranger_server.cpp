@@ -20,6 +20,7 @@
 #include <ranger_msgs/action/aruco_follow.hpp>
 #include <ranger_msgs/action/aruco_search.hpp>
 #include <ranger_msgs/action/aruco_strafe.hpp>
+#include <ranger_msgs/action/turn_around.hpp>
 
 using namespace std::chrono_literals;
 
@@ -37,6 +38,9 @@ public:
 
     using ArucoStrafe = ranger_msgs::action::ArucoStrafe;
     using GoalHandleArucoStrafe = rclcpp_action::ServerGoalHandle<ArucoStrafe>;
+
+    using TurnAround = ranger_msgs::action::TurnAround;
+    using GoalHandleTurnAround = rclcpp_action::ServerGoalHandle<TurnAround>;
 
     RangerServer()
     : Node("ranger_server"),
@@ -74,6 +78,15 @@ public:
       last_strafe_control_time(this->get_clock()->now()),
       strafe_velocity_profile_initialized(false),
       strafe_deceleration_phase(false),
+      // TurnAround Action Variables
+      turn_around_active(false),
+      turn_around_direction(1),
+      turn_around_start_time(this->get_clock()->now()),
+      turn_around_target_angle(180.0),
+      current_turn_around_angular_velocity(0.0),
+      last_turn_around_control_time(this->get_clock()->now()),
+      turn_around_velocity_profile_initialized(false),
+      turn_around_deceleration_phase(false),
       // Helper Variables
       marker_detected(false),
       distance_to_marker(-1.0),
@@ -81,7 +94,8 @@ public:
       curr_angular_vel(0.0),
       last_follow_feedback_time(this->get_clock()->now()),
       last_search_feedback_time(this->get_clock()->now()),
-      last_strafe_feedback_time(this->get_clock()->now())
+      last_strafe_feedback_time(this->get_clock()->now()),
+      last_turn_around_feedback_time(this->get_clock()->now())
     {
         RCLCPP_INFO(this->get_logger(), "RangerServer node has been started.");
 
@@ -110,6 +124,13 @@ public:
             std::bind(&RangerServer::handle_strafe_cancel, this, std::placeholders::_1),
             std::bind(&RangerServer::handle_strafe_accepted, this, std::placeholders::_1));
 
+        this->turn_around_action_server = rclcpp_action::create_server<TurnAround>(
+            this,
+            "turn_around",
+            std::bind(&RangerServer::handle_turn_around_goal, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&RangerServer::handle_turn_around_cancel, this, std::placeholders::_1),
+            std::bind(&RangerServer::handle_turn_around_accepted, this, std::placeholders::_1));
+
         // Initialize actions result and feedback
         follow_result   = std::make_shared<ArucoFollow::Result>();
         follow_feedback = std::make_shared<ArucoFollow::Feedback>();
@@ -117,6 +138,8 @@ public:
         search_feedback = std::make_shared<ArucoSearch::Feedback>();
         strafe_result   = std::make_shared<ArucoStrafe::Result>();
         strafe_feedback = std::make_shared<ArucoStrafe::Feedback>();
+        turn_around_result   = std::make_shared<TurnAround::Result>();
+        turn_around_feedback = std::make_shared<TurnAround::Feedback>();
 
         // Create subscribers and publishers using parameters
         std::string aruco_topic   = this->get_parameter("topics.aruco_markers").as_string();
@@ -148,6 +171,7 @@ public:
         RCLCPP_INFO(this->get_logger(), "Action server '/follow_aruco' is ready.");
         RCLCPP_INFO(this->get_logger(), "Action server '/search_aruco' is ready.");
         RCLCPP_INFO(this->get_logger(), "Action server '/strafe_aruco' is ready.");
+        RCLCPP_INFO(this->get_logger(), "Action server '/turn_around' is ready.");
     }
 
 private:
@@ -155,6 +179,7 @@ private:
     rclcpp_action::Server<ArucoFollow>::SharedPtr follow_action_server;
     rclcpp_action::Server<ArucoSearch>::SharedPtr search_action_server;
     rclcpp_action::Server<ArucoStrafe>::SharedPtr strafe_action_server;
+    rclcpp_action::Server<TurnAround>::SharedPtr turn_around_action_server;
 
     // Publishers and subscribers
     rclcpp::Subscription<ros2_aruco_interfaces::msg::ArucoMarkers>::SharedPtr aruco_subscriber;
@@ -172,11 +197,14 @@ private:
     std::shared_ptr<ArucoSearch::Feedback> search_feedback;
     std::shared_ptr<ArucoStrafe::Result> strafe_result;
     std::shared_ptr<ArucoStrafe::Feedback> strafe_feedback;
+    std::shared_ptr<TurnAround::Result> turn_around_result;
+    std::shared_ptr<TurnAround::Feedback> turn_around_feedback;
 
     // Current goal handle
     std::shared_ptr<GoalHandleArucoFollow> current_follow_goal_handle;
     std::shared_ptr<GoalHandleArucoSearch> current_search_goal_handle;
     std::shared_ptr<GoalHandleArucoStrafe> current_strafe_goal_handle;
+    std::shared_ptr<GoalHandleTurnAround> current_turn_around_goal_handle;
 
     // Follow Action state variables
     int64_t follow_marker_id;
@@ -227,6 +255,18 @@ private:
     bool strafe_velocity_profile_initialized;
     bool strafe_deceleration_phase;
 
+    // TurnAround Action state variables
+    bool turn_around_active;
+    int64_t turn_around_direction;
+    rclcpp::Time turn_around_start_time;
+    double turn_around_target_angle; // Target angle in degrees
+
+    // TurnAround velocity profile variables
+    double current_turn_around_angular_velocity;
+    rclcpp::Time last_turn_around_control_time;
+    bool turn_around_velocity_profile_initialized;
+    bool turn_around_deceleration_phase;
+
     // Marker state
     bool marker_detected;
     geometry_msgs::msg::Pose current_marker_pose;
@@ -270,6 +310,13 @@ private:
     double strafe_min_vel;
     double strafe_min_offset_for_decel;
     double strafe_alignment_offset;
+    double turn_around_angular_vel;
+    int default_turn_around_direction;
+    double max_angular_vel_turn_around;
+    double turn_around_accel;
+    double turn_around_decel;
+    double turn_around_min_angular_vel;
+    double turn_around_min_degree_for_decel;
     double loop_rate;
     double feedback_rate;
     bool debug_enabled;
@@ -279,6 +326,7 @@ private:
     rclcpp::Time last_follow_feedback_time;
     rclcpp::Time last_search_feedback_time;
     rclcpp::Time last_strafe_feedback_time;
+    rclcpp::Time last_turn_around_feedback_time;
     // Parameter initialization method
     void initialize_parameters()
     {
@@ -315,6 +363,14 @@ private:
         this->declare_parameter("strafe_action.alignment_tolerance", 0.05); //m
         this->declare_parameter("strafe_action.min_offset_for_decel", 0.2); //m
         this->declare_parameter("strafe_action.alignment_offset", 0.0); //m
+        // TurnAround action parameters
+        this->declare_parameter("turn_around_action.default_angular_vel", 1.0);
+        this->declare_parameter("turn_around_action.default_direction", 1);
+        this->declare_parameter("turn_around_action.max_angular_vel", 1.2);
+        this->declare_parameter("turn_around_action.accel", 1.0);
+        this->declare_parameter("turn_around_action.decel", 1.0);
+        this->declare_parameter("turn_around_action.min_angular_vel", 0.2);
+        this->declare_parameter("turn_around_action.min_degree_for_decel", 140.0);
         // Topic parameters
         this->declare_parameter("topics.aruco_markers", "/aruco_markers");
         this->declare_parameter("topics.cmd_vel", "/cmd_vel");
@@ -332,7 +388,9 @@ private:
         load_parameters();
         
         RCLCPP_INFO(this->get_logger(), "Parameters initialized successfully");
-        log_parameter_summary();
+        if (debug_enabled) {
+            log_parameter_summary();
+        }
     }
     
     void load_parameters()
@@ -370,6 +428,14 @@ private:
         strafe_alignment_tolerance  = this->get_parameter("strafe_action.alignment_tolerance").as_double();
         strafe_min_offset_for_decel = this->get_parameter("strafe_action.min_offset_for_decel").as_double();
         strafe_alignment_offset     = this->get_parameter("strafe_action.alignment_offset").as_double();
+        // TurnAround action parameters
+        turn_around_angular_vel           = this->get_parameter("turn_around_action.default_angular_vel").as_double();
+        default_turn_around_direction     = this->get_parameter("turn_around_action.default_direction").as_int();
+        max_angular_vel_turn_around       = this->get_parameter("turn_around_action.max_angular_vel").as_double();
+        turn_around_accel                 = this->get_parameter("turn_around_action.accel").as_double();
+        turn_around_decel                 = this->get_parameter("turn_around_action.decel").as_double();
+        turn_around_min_angular_vel       = this->get_parameter("turn_around_action.min_angular_vel").as_double();
+        turn_around_min_degree_for_decel  = this->get_parameter("turn_around_action.min_degree_for_decel").as_double();
         // Control Loop rate
         loop_rate         = this->get_parameter("control.loop_rate").as_double();
         feedback_rate     = this->get_parameter("control.feedback_rate").as_double();
@@ -431,7 +497,14 @@ private:
     
     double enforce_angular_velocity_limit(double requested_vel, const std::string& action_name, bool is_search = false)
     {
-        double max_limit = is_search ? max_angular_vel_search : max_angular_vel_follow;
+        double max_limit;
+        if (action_name == "turn_around") {
+            max_limit = max_angular_vel_turn_around;
+        } else if (is_search) {
+            max_limit = max_angular_vel_search;
+        } else {
+            max_limit = max_angular_vel_follow;
+        }
         
         if (std::abs(requested_vel) > max_limit) {
             RCLCPP_WARN(this->get_logger(), 
@@ -749,6 +822,73 @@ private:
         }
     }
     
+    // TURN AROUND ACTION HANDLERS
+    rclcpp_action::GoalResponse handle_turn_around_goal(
+        const rclcpp_action::GoalUUID & uuid,
+        std::shared_ptr<const TurnAround::Goal> goal)
+    {
+        (void)uuid;
+        (void)goal;
+        
+        // Check if another action is already active
+        if (follow_active || search_active || strafe_active || turn_around_active) {
+            RCLCPP_WARN(this->get_logger(), "Another action is already active. Rejecting turn around goal.");
+            return rclcpp_action::GoalResponse::REJECT;
+        }
+        
+        RCLCPP_INFO(this->get_logger(), "Received turn around goal request");
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    }
+
+    rclcpp_action::CancelResponse handle_turn_around_cancel(
+        const std::shared_ptr<GoalHandleTurnAround> goal_handle)
+    {
+        (void)goal_handle;
+        RCLCPP_INFO(this->get_logger(), "Received turn around cancel request");
+        turn_around_active = false;
+        stop_robot();
+        return rclcpp_action::CancelResponse::ACCEPT;
+    }
+
+    void handle_turn_around_accepted(const std::shared_ptr<GoalHandleTurnAround> goal_handle)
+    {
+        // Update parameters
+        load_parameters();
+        
+        // Get goal request parameters
+        auto goal = goal_handle->get_goal();
+        
+        // Optional parameters with defaults and safety limits
+        double requested_angular_vel = (goal->angular_vel > 0.0) ? goal->angular_vel : turn_around_angular_vel;
+        turn_around_angular_vel = enforce_angular_velocity_limit(requested_angular_vel, "turn_around");
+
+        turn_around_direction = (goal->direction != 0) ? goal->direction : default_turn_around_direction;
+        
+        // Validate turn direction
+        if (turn_around_direction != 1 && turn_around_direction != -1) {
+            turn_around_direction = default_turn_around_direction;
+            RCLCPP_WARN(this->get_logger(), "Invalid direction specified, must use [-1 || 1], using default value: %s", 
+                       (default_turn_around_direction == 1) ? "counter-clockwise" : "clockwise");
+        }
+
+        current_turn_around_goal_handle = goal_handle;
+        turn_around_active = true;
+        turn_around_start_time = this->get_clock()->now();
+        
+        // Reset IMU rotation tracking
+        initial_quaternion_set = false;
+        current_rotation_angle = 0.0;
+        cumulative_rotation = 0.0;
+        
+        // Initialize velocity profile
+        current_turn_around_angular_velocity = 0.0;
+        last_turn_around_control_time = this->get_clock()->now();
+        turn_around_velocity_profile_initialized = true;
+        turn_around_deceleration_phase = false;
+        
+        RCLCPP_INFO(this->get_logger(), "Turn around action started | angular_vel: %.2f | direction: %s | target: 180°",
+                   turn_around_angular_vel, (turn_around_direction == 1) ? "counter-clockwise" : "clockwise");
+    }
 
     bool check_aruco_topic_availability()
     {
@@ -936,6 +1076,8 @@ private:
             control_search_action();
         } else if (strafe_active && current_strafe_goal_handle) {
             control_strafe_action();
+        } else if (turn_around_active && current_turn_around_goal_handle) {
+            control_turn_around_action();
         }
     }
 
@@ -1352,6 +1494,123 @@ private:
         }
     }
 
+    void control_turn_around_action()
+    {
+        if (!turn_around_active || !current_turn_around_goal_handle) return;
+        
+        // Check if the turn around is complete (180 degrees)
+        double target_rotation = turn_around_target_angle;
+        if (std::abs(current_rotation_angle) >= target_rotation) {
+            // Turn around complete
+            stop_robot();
+            turn_around_active = false;
+            
+            turn_around_result->success = true;
+            turn_around_result->message = "Turn around completed successfully";
+            current_turn_around_goal_handle->succeed(turn_around_result);
+            
+            RCLCPP_INFO(this->get_logger(), "Turn around action completed. Rotated: %.1f degrees", current_rotation_angle);
+            return;
+        }
+        
+        // Apply trapezoidal velocity profile for smooth motion
+        apply_turn_around_velocity_profile();
+        
+        // Publish feedback (throttled)
+        if (should_publish_turn_around_feedback()) {
+            turn_around_feedback->curr_angular_vel = std::round(current_turn_around_angular_velocity * turn_around_direction * 1000.0f) / 1000.0f;
+            current_turn_around_goal_handle->publish_feedback(turn_around_feedback);
+        }
+    }
+
+    void apply_turn_around_velocity_profile()
+    {
+        auto current_time = this->get_clock()->now();
+        
+        // Initialize time tracking if this is the first call
+        if (!turn_around_velocity_profile_initialized) {
+            last_turn_around_control_time = current_time;
+            current_turn_around_angular_velocity = 0.0;
+            turn_around_deceleration_phase = false;
+            turn_around_velocity_profile_initialized = true;
+        }
+        
+        // Calculate time delta
+        double dt = (current_time - last_turn_around_control_time).seconds();
+        last_turn_around_control_time = current_time;
+        
+        // Skip if dt is too large (likely first iteration or system pause)
+        if (dt > 0.1) {
+            dt = 0.01; // Use small default dt
+        }
+        
+        // Determine target velocity based on trapezoidal profile
+        double target_velocity = 0.0;
+        double remaining_rotation = turn_around_target_angle - std::abs(current_rotation_angle);
+        
+        if (remaining_rotation <= turn_around_min_degree_for_decel) {
+            // Phase 3: Deceleration phase - linearly reduce velocity based on remaining rotation
+            turn_around_deceleration_phase = true;
+            
+            if (remaining_rotation <= 1.0) { // Close to target - stop
+                target_velocity = 0.0;
+            } else {
+                // Linear interpolation from min_angular_vel to turn_around_angular_vel
+                double velocity_range = turn_around_angular_vel - turn_around_min_angular_vel;
+                target_velocity = turn_around_min_angular_vel + 
+                                (velocity_range * remaining_rotation / turn_around_min_degree_for_decel);
+                
+                // Ensure target velocity is within bounds
+                target_velocity = std::max(target_velocity, turn_around_min_angular_vel);
+                target_velocity = std::min(target_velocity, turn_around_angular_vel);
+            }
+        } else {
+            // Phase 1 & 2: Acceleration/Constant velocity phase
+            target_velocity = turn_around_angular_vel;
+            turn_around_deceleration_phase = false;
+        }
+        
+        // Apply acceleration/deceleration towards target velocity
+        double velocity_error = target_velocity - current_turn_around_angular_velocity;
+        
+        if (std::abs(velocity_error) > 0.001) { // Small threshold to avoid oscillation
+            if (velocity_error > 0) {
+                // Accelerate
+                current_turn_around_angular_velocity += turn_around_accel * dt;
+                current_turn_around_angular_velocity = std::min(current_turn_around_angular_velocity, target_velocity);
+            } else {
+                // Decelerate
+                current_turn_around_angular_velocity -= turn_around_decel * dt;
+                current_turn_around_angular_velocity = std::max(current_turn_around_angular_velocity, target_velocity);
+            }
+        }
+        
+        // Ensure velocity doesn't exceed limits
+        current_turn_around_angular_velocity = std::min(current_turn_around_angular_velocity, max_angular_vel_turn_around);
+        current_turn_around_angular_velocity = std::max(current_turn_around_angular_velocity, 0.0);
+        
+        // Apply movement
+        auto twist_msg = geometry_msgs::msg::Twist();
+        twist_msg.angular.z = current_turn_around_angular_velocity * turn_around_direction;
+        
+        // No linear movement during turn around
+        twist_msg.linear.x = 0.0;
+        twist_msg.linear.y = 0.0;
+        twist_msg.linear.z = 0.0;
+        twist_msg.angular.x = 0.0;
+        twist_msg.angular.y = 0.0;
+        
+        cmd_vel_publisher->publish(twist_msg);
+        
+        if (debug_enabled) {
+            RCLCPP_DEBUG(this->get_logger(), 
+                "Turn around trapezoidal profile: current_vel=%.3f, target_vel=%.3f, rotation=%.1f°, remaining=%.1f°, decel_phase=%s, direction=%s", 
+                current_turn_around_angular_velocity, target_velocity, current_rotation_angle, remaining_rotation,
+                turn_around_deceleration_phase ? "true" : "false", 
+                (turn_around_direction == 1) ? "ccw" : "cw");
+        }
+    }
+
     // Feedback throttling helper methods
     bool should_publish_follow_feedback()
     {
@@ -1384,6 +1643,18 @@ private:
         
         if ((current_time - last_strafe_feedback_time).seconds() >= feedback_period) {
             last_strafe_feedback_time = current_time;
+            return true;
+        }
+        return false;
+    }
+
+    bool should_publish_turn_around_feedback()
+    {
+        auto current_time = this->get_clock()->now();
+        double feedback_period = 1.0 / feedback_rate;  // Convert Hz to seconds
+        
+        if ((current_time - last_turn_around_feedback_time).seconds() >= feedback_period) {
+            last_turn_around_feedback_time = current_time;
             return true;
         }
         return false;

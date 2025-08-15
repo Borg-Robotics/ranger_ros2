@@ -58,6 +58,18 @@ ranger_server:
       min_offset_for_decel: 0.3    # m - Minimum lateral offset to start deceleration
       alignment_offset: 0.075        # m - Additional offset to continue strafing after alignment (0 = stop at alignment tolerance)
 
+    turn_around_action:
+      # Default velocity
+      default_angular_vel: 1.0     # rad/s - Default angular velocity for turn around action
+      default_direction: 1         # 1 for counter-clockwise, -1 for clockwise
+      # Maximum velocity limits (safety parameters)
+      max_angular_vel: 1.2         # rad/s - Maximum allowed angular velocity for turn around action
+      # Trapezoidal velocity profile parameters
+      accel: 1.0                  # rad/s^2 - Maximum acceleration for turn around action
+      decel: 1.0                  # rad/s^2 - Maximum deceleration for turn around action
+      min_angular_vel: 0.2        # rad/s - Minimum angular velocity during turn around
+      min_degree_for_decel: 140.0  # degrees - Minimum rotation angle to start deceleration
+      
     # Topic and frame parameters
     topics:
       aruco_markers: "/aruco_markers"  # ArUco markers topic

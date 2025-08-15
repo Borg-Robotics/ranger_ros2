@@ -34,6 +34,7 @@ set(action_file
 "action/ArucoFollow.action"
 "action/ArucoSearch.action"
 "action/ArucoStrafe.action"
+"action/TurnAround.action"
 )
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${msg_file}

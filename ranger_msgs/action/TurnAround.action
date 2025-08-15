@@ -1,5 +1,4 @@
-# Request
-int64 marker_id # Mandatory
+#Request
 float32 angular_vel # Optional
 int64 direction # Optional
                 #  1 for counter-clockwise (Default)
@@ -10,5 +9,4 @@ string message
 bool success
 ---
 # Feedback
-float32 elapsed_time 
 float32 curr_angular_vel
