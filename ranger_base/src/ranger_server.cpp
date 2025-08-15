@@ -829,7 +829,7 @@ private:
     {
         (void)uuid;
         (void)goal;
-        
+
         // Check if another action is already active
         if (follow_active || search_active || strafe_active || turn_around_active) {
             RCLCPP_WARN(this->get_logger(), "Another action is already active. Rejecting turn around goal.");
@@ -1500,7 +1500,25 @@ private:
         
         // Check if the turn around is complete (180 degrees)
         double target_rotation = turn_around_target_angle;
-        if (std::abs(current_rotation_angle) >= target_rotation) {
+        double abs_rotation_angle = std::abs(current_rotation_angle);
+        
+        // Handle angle wraparound - if we're very close to ±180°, consider it complete
+        bool target_reached = false;
+        if (abs_rotation_angle >= target_rotation) {
+            target_reached = true;
+        } else if (abs_rotation_angle > 178.0) {
+            // We're very close to 180°, check if angle wrapped around
+            // If current angle is around ±179° to ±180°, we're likely at or past target
+            if (turn_around_direction == 1 && current_rotation_angle < -178.0) {
+                // Counter-clockwise rotation wrapped from +180° to -180°
+                target_reached = true;
+            } else if (turn_around_direction == -1 && current_rotation_angle > 178.0) {
+                // Clockwise rotation wrapped from -180° to +180°
+                target_reached = true;
+            }
+        }
+        
+        if (target_reached) {
             // Turn around complete
             stop_robot();
             turn_around_active = false;
@@ -1530,9 +1548,10 @@ private:
         // Initialize time tracking if this is the first call
         if (!turn_around_velocity_profile_initialized) {
             last_turn_around_control_time = current_time;
+            turn_around_velocity_profile_initialized = true;
             current_turn_around_angular_velocity = 0.0;
             turn_around_deceleration_phase = false;
-            turn_around_velocity_profile_initialized = true;
+            return;
         }
         
         // Calculate time delta
@@ -1541,52 +1560,40 @@ private:
         
         // Skip if dt is too large (likely first iteration or system pause)
         if (dt > 0.1) {
-            dt = 0.01; // Use small default dt
+            return;
         }
         
         // Determine target velocity based on trapezoidal profile
         double target_velocity = 0.0;
-        double remaining_rotation = turn_around_target_angle - std::abs(current_rotation_angle);
         
-        if (remaining_rotation <= turn_around_min_degree_for_decel) {
-            // Phase 3: Deceleration phase - linearly reduce velocity based on remaining rotation
-            turn_around_deceleration_phase = true;
-            
-            if (remaining_rotation <= 1.0) { // Close to target - stop
-                target_velocity = 0.0;
-            } else {
-                // Linear interpolation from min_angular_vel to turn_around_angular_vel
-                double velocity_range = turn_around_angular_vel - turn_around_min_angular_vel;
-                target_velocity = turn_around_min_angular_vel + 
-                                (velocity_range * remaining_rotation / turn_around_min_degree_for_decel);
-                
-                // Ensure target velocity is within bounds
-                target_velocity = std::max(target_velocity, turn_around_min_angular_vel);
-                target_velocity = std::min(target_velocity, turn_around_angular_vel);
-            }
-        } else {
+        // Get current rotation angle (absolute value for comparison)
+        double abs_rotation_angle = std::abs(current_rotation_angle);
+        
+        if (abs_rotation_angle < turn_around_min_degree_for_decel) {
             // Phase 1 & 2: Acceleration/Constant velocity phase
             target_velocity = turn_around_angular_vel;
             turn_around_deceleration_phase = false;
+        } else {
+            // Phase 3: Deceleration phase
+            target_velocity = turn_around_min_angular_vel;
+            turn_around_deceleration_phase = true;
         }
         
         // Apply acceleration/deceleration towards target velocity
         double velocity_error = target_velocity - current_turn_around_angular_velocity;
         
-        if (std::abs(velocity_error) > 0.001) { // Small threshold to avoid oscillation
+        if (std::abs(velocity_error) > 0.001) {
+            double max_change = (turn_around_deceleration_phase ? turn_around_decel : turn_around_accel) * dt;
+            
             if (velocity_error > 0) {
-                // Accelerate
-                current_turn_around_angular_velocity += turn_around_accel * dt;
-                current_turn_around_angular_velocity = std::min(current_turn_around_angular_velocity, target_velocity);
+                current_turn_around_angular_velocity += std::min(velocity_error, max_change);
             } else {
-                // Decelerate
-                current_turn_around_angular_velocity -= turn_around_decel * dt;
-                current_turn_around_angular_velocity = std::max(current_turn_around_angular_velocity, target_velocity);
+                current_turn_around_angular_velocity += std::max(velocity_error, -max_change);
             }
         }
         
         // Ensure velocity doesn't exceed limits
-        current_turn_around_angular_velocity = std::min(current_turn_around_angular_velocity, max_angular_vel_turn_around);
+        current_turn_around_angular_velocity = std::min(current_turn_around_angular_velocity, turn_around_angular_vel);
         current_turn_around_angular_velocity = std::max(current_turn_around_angular_velocity, 0.0);
         
         // Apply movement
@@ -1604,8 +1611,8 @@ private:
         
         if (debug_enabled) {
             RCLCPP_DEBUG(this->get_logger(), 
-                "Turn around trapezoidal profile: current_vel=%.3f, target_vel=%.3f, rotation=%.1f°, remaining=%.1f°, decel_phase=%s, direction=%s", 
-                current_turn_around_angular_velocity, target_velocity, current_rotation_angle, remaining_rotation,
+                "Turn around trapezoidal profile: current_vel=%.3f, target_vel=%.3f, rotation=%.1f°, decel_phase=%s, direction=%s", 
+                current_turn_around_angular_velocity, target_velocity, current_rotation_angle,
                 turn_around_deceleration_phase ? "true" : "false", 
                 (turn_around_direction == 1) ? "ccw" : "cw");
         }
