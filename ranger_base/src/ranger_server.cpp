@@ -1255,31 +1255,11 @@ private:
             target_velocity = strafe_vel;
             strafe_deceleration_phase = false;
         } else {
-            // Marker detected - check which phase we're in
+            // Marker detected - check which phase we're in           
             if (lateral_offset <= strafe_min_offset_for_decel) {
-                // Phase 3: Deceleration phase - linearly reduce velocity based on remaining distance
+                // Phase 3: Deceleration phase - target minimum velocity to reach final position
+                target_velocity = strafe_min_vel;
                 strafe_deceleration_phase = true;
-                
-                // Calculate remaining distance to tolerance + offset
-                double target_alignment = strafe_alignment_tolerance + strafe_alignment_offset;
-                double remaining_distance = lateral_offset - target_alignment;
-                double decel_range = strafe_min_offset_for_decel - target_alignment;
-                
-                if (remaining_distance <= 0) {
-                    // Within tolerance - stop
-                    target_velocity = 0.0;
-                } else if (decel_range > 0.0001) {
-                    // Linear interpolation from min_alignment_vel to strafe_vel
-                    double velocity_range = strafe_vel - strafe_min_vel;
-                    target_velocity = strafe_min_vel + 
-                                    (velocity_range * remaining_distance / decel_range);
-                    
-                    // Ensure target velocity is within bounds
-                    target_velocity = std::max(target_velocity, strafe_min_vel);
-                    target_velocity = std::min(target_velocity, strafe_vel);
-                } else {
-                    target_velocity = strafe_min_vel;
-                }
             } else {
                 // Phase 1 & 2: Marker found but not yet in deceleration zone
                 target_velocity = strafe_vel;
@@ -1290,15 +1270,13 @@ private:
         // Apply acceleration/deceleration towards target velocity
         double velocity_error = target_velocity - current_strafe_velocity;
         
-        if (std::abs(velocity_error) > 0.001) { // Small threshold to avoid oscillation
+        if (std::abs(velocity_error) > 0.001) {
+            double max_change = (strafe_deceleration_phase ? strafe_decel : strafe_accel) * dt;
+            
             if (velocity_error > 0) {
-                // Accelerate
-                current_strafe_velocity += strafe_accel * dt;
-                current_strafe_velocity = std::min(current_strafe_velocity, target_velocity);
+                current_strafe_velocity += std::min(velocity_error, max_change);
             } else {
-                // Decelerate
-                current_strafe_velocity -= strafe_decel * dt;
-                current_strafe_velocity = std::max(current_strafe_velocity, target_velocity);
+                current_strafe_velocity += std::max(velocity_error, -max_change);
             }
         }
         
@@ -1321,8 +1299,8 @@ private:
         
         if (debug_enabled) {
             RCLCPP_DEBUG(this->get_logger(), 
-                "Trapezoidal velocity profile: current_vel=%.3f, target_vel=%.3f, lateral_offset=%.3f, decel_phase=%s, direction=%s", 
-                current_strafe_velocity, target_velocity, lateral_offset, 
+                "Strafe velocity profile: current_vel=%.3f, target_vel=%.3f, lateral_offset=%.3f, decel_phase=%s, direction=%s", 
+                current_strafe_velocity, target_velocity, lateral_offset,
                 strafe_deceleration_phase ? "true" : "false", 
                 (strafe_direction == 1) ? "left" : "right");
         }
