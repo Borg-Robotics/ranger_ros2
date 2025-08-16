@@ -8,19 +8,19 @@ ranger_server:
     # Action Server Parameters
     follow_action:
       # Default velocity parameters
-      default_linear_vel: 0.65    # m/s - Default linear velocity for follow action
+      default_linear_vel: 0.8    # m/s - Default linear velocity for follow action
       default_angular_vel: 0.15   # rad/s - Default angular velocity for follow action
       # Maximum velocity limits (safety parameters)
-      max_linear_vel: 0.75         # m/s - Maximum allowed linear velocity
+      max_linear_vel: 1.0         # m/s - Maximum allowed linear velocity
       max_angular_vel: 0.3         # rad/s - Maximum allowed angular velocity
       # Control parameters
       marker_timeout: 2.0         # s - Timeout for marker detection loss 
       # Smoothing parameters
       angular_gain: 1.0          # Proportional gain for angular control
       # Trapezoidal velocity profile parameters
-      accel: 0.5                # m/s^2 - Maximum acceleration
-      decel: 0.6                # m/s^2 - Maximum deceleration
-      min_dist_for_decel: 0.55  # m - Distance threshold to start deceleration
+      accel: 3.0                # m/s^2 - Maximum acceleration
+      decel: 0.7                # m/s^2 - Maximum deceleration
+      min_dist_for_decel: 0.59  # m - Distance threshold to start deceleration
       min_linear_vel: 0.05      # m/s - Minimum linear velocity during deceleration phase
       # Alignment parameters
       alignment_tolerance: 0.01     # rad - Tolerance for alignment [Dead-Zone] (0.57 degrees)
@@ -50,17 +50,17 @@ ranger_server:
       # Timeout parameters
       strafe_timeout: 30.0
       # Acceleration/Deceleration parameters
-      accel: 0.3                  # m/s^2 - Maximum acceleration for strafe action
-      decel: 0.75                  # m/s^2 - Maximum deceleration for strafe action
+      accel: 0.7                  # m/s^2 - Maximum acceleration for strafe action
+      decel: 0.6                  # m/s^2 - Maximum deceleration for strafe action
       min_vel: 0.05                 # m/s - Minimum velocity during final approach
       # Alignment parameters
       alignment_tolerance: 0.05    # m - Tolerance for lateral alignment
-      min_offset_for_decel: 0.3    # m - Minimum lateral offset to start deceleration
-      alignment_offset: 0.075        # m - Additional offset to continue strafing after alignment (0 = stop at alignment tolerance)
+      min_offset_for_decel: 0.5    # m - Minimum lateral offset to start deceleration
+      alignment_offset: 0.15       # m - Additional offset to continue strafing after alignment (0 = stop at alignment tolerance)
 
     turn_around_action:
       # Default velocity
-      default_angular_vel: 1.25     # rad/s - Default angular velocity for turn around action
+      default_angular_vel: 1.1     # rad/s - Default angular velocity for turn around action
       default_direction: 1         # 1 for counter-clockwise, -1 for clockwise
       # Maximum velocity limits (safety parameters)
       max_angular_vel: 1.8         # rad/s - Maximum allowed angular velocity for turn around action
@@ -68,7 +68,7 @@ ranger_server:
       accel: 1.75                 # rad/s^2 - Maximum acceleration for turn around action
       decel: 1.25                  # rad/s^2 - Maximum deceleration for turn around action
       min_angular_vel: 0.2        # rad/s - Minimum angular velocity during turn around
-      min_degree_for_decel: 140.0  # degrees - Minimum rotation angle to start deceleration
+      min_degree_for_decel: 145.0  # degrees - Minimum rotation angle to start deceleration
       
     # Topic and frame parameters
     topics:
