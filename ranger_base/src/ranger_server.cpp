@@ -309,7 +309,6 @@ private:
     double strafe_decel;
     double strafe_min_vel;
     double strafe_min_offset_for_decel;
-    double strafe_alignment_offset;
     double turn_around_angular_vel;
     int default_turn_around_direction;
     double max_angular_vel_turn_around;
@@ -427,7 +426,6 @@ private:
         strafe_min_vel             = this->get_parameter("strafe_action.min_vel").as_double();
         strafe_alignment_tolerance  = this->get_parameter("strafe_action.alignment_tolerance").as_double();
         strafe_min_offset_for_decel = this->get_parameter("strafe_action.min_offset_for_decel").as_double();
-        strafe_alignment_offset     = this->get_parameter("strafe_action.alignment_offset").as_double();
         // TurnAround action parameters
         turn_around_angular_vel           = this->get_parameter("turn_around_action.default_angular_vel").as_double();
         default_turn_around_direction     = this->get_parameter("turn_around_action.default_direction").as_int();
@@ -479,7 +477,6 @@ private:
         RCLCPP_INFO(this->get_logger(), "  Min offset for deceleration: %.2f m", strafe_min_offset_for_decel);
         RCLCPP_INFO(this->get_logger(), "  Strafe timeout: %.1f s", strafe_timeout);
         RCLCPP_INFO(this->get_logger(), "  Alignment tolerance: %.2f m", strafe_alignment_tolerance);
-        RCLCPP_INFO(this->get_logger(), "  Alignment offset: %.2f m", strafe_alignment_offset);
         RCLCPP_INFO(this->get_logger(), "=========================================");
     }
     
@@ -1190,15 +1187,14 @@ private:
         
         // Apply trapezoidal velocity profile
         apply_strafe_velocity_profile();
-        
-        // Check if we've reached alignment tolerance plus offset
+
+        // Check if we've reached alignment tolerance
         if (strafe_marker_detected) {
             float lateral_offset = std::abs(strafe_marker_pose.position.y);
-            float target_alignment = strafe_alignment_tolerance + strafe_alignment_offset;
-            if (lateral_offset <= target_alignment) {
+            if (lateral_offset <= strafe_alignment_tolerance) {
                 RCLCPP_INFO(this->get_logger(), 
-                    "Aligned with marker %ld within tolerance + offset (%.3fm + %.3fm = %.3fm). Action completed.", 
-                    strafe_marker_id, strafe_alignment_tolerance, strafe_alignment_offset, target_alignment);
+                    "Aligned with marker %ld within tolerance (%.3fm). Action completed.", 
+                    strafe_marker_id, strafe_alignment_tolerance);
                 
                 stop_robot();
                 

@@ -43,20 +43,19 @@ ranger_server:
 
     strafe_action:
       # Default velocity
-      default_vel: 0.4             # m/s - Default velocity for strafe action
+      default_vel: 0.5             # m/s - Default velocity for strafe action
       default_direction: 1          # 1 for left strafe, -1 for right strafe (TODO: CHECK DIRECTIONS)
       # Maximum velocity limits (safety parameters)
       max_vel: 0.5                 # m/s - Maximum allowed velocity
       # Timeout parameters
       strafe_timeout: 30.0
       # Acceleration/Deceleration parameters
-      accel: 0.7                  # m/s^2 - Maximum acceleration for strafe action
-      decel: 0.6                  # m/s^2 - Maximum deceleration for strafe action
-      min_vel: 0.05                 # m/s - Minimum velocity during final approach
+      accel: 0.75                  # m/s^2 - Maximum acceleration for strafe action
+      decel: 0.4                   # m/s^2 - Maximum deceleration for strafe action
+      min_vel: 0.025               # m/s - Minimum velocity during final approach
       # Alignment parameters
       alignment_tolerance: 0.05    # m - Tolerance for lateral alignment
-      min_offset_for_decel: 0.5    # m - Minimum lateral offset to start deceleration
-      alignment_offset: 0.15       # m - Additional offset to continue strafing after alignment (0 = stop at alignment tolerance)
+      min_offset_for_decel: 0.4    # m - Minimum lateral offset to start deceleration
 
     turn_around_action:
       # Default velocity
