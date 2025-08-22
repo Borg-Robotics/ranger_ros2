@@ -161,6 +161,10 @@ public:
             rotation_angle_debug_publisher = this->create_publisher<std_msgs::msg::Float64>(
                 "/ranger_server/debug/rotation_angle", 10);
             RCLCPP_INFO(this->get_logger(), "Debug publisher for rotation angle created on topic: /ranger_server/debug/rotation_angle");
+            
+            distance_to_marker_debug_publisher = this->create_publisher<std_msgs::msg::Float64>(
+                "/ranger_server/debug/distance_to_marker", 10);
+            RCLCPP_INFO(this->get_logger(), "Debug publisher for distance to marker created on topic: /ranger_server/debug/distance_to_marker");
         }
 
         // Timer for control loop using parameter
@@ -186,6 +190,7 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscriber;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_publisher;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr rotation_angle_debug_publisher;
+    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr distance_to_marker_debug_publisher;
     
     // Timer
     rclcpp::TimerBase::SharedPtr control_timer;
@@ -1096,6 +1101,13 @@ private:
         
         // Calculate distance to marker 
         distance_to_marker = calculate_distance_to_marker();
+        
+        // Publish debug information if enabled and publisher exists
+        if (debug_enabled && distance_to_marker_debug_publisher) {
+            auto debug_msg = std_msgs::msg::Float64();
+            debug_msg.data = distance_to_marker;
+            distance_to_marker_debug_publisher->publish(debug_msg);
+        }
         
         // Send follow_feedback (throttled)
         if (should_publish_follow_feedback()) {
