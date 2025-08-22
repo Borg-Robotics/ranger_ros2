@@ -68,6 +68,12 @@ ranger_server:
       decel: 1.25                  # rad/s^2 - Maximum deceleration for turn around action
       min_angular_vel: 0.2        # rad/s - Minimum angular velocity during turn around
       min_degree_for_decel: 145.0  # degrees - Minimum rotation angle to start deceleration
+
+    reverse_action:
+      # Default velocity
+      default_vel: 0.15             # m/s - Default velocity for reverse action
+      # Maximum velocity limits (safety parameters)
+      max_vel: 0.3                 # m/s - Maximum allowed velocity for reverse action
       
     # Topic and frame parameters
     topics:

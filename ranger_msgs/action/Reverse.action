@@ -1,0 +1,12 @@
+# Request
+int64 marker_id
+float32 reverse_distance  # Distance to reverse backward (in meters)
+float32 velocity
+---
+# Response
+string message
+bool success
+---
+# Feedback
+float32 distance_to_marker
+float32 current_velocity

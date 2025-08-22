@@ -71,7 +71,7 @@ This repository is a fork of [agilexrobotics/ranger_ros2](https://github.com/agi
           - Robot rotates until marker is found or timeout occurs
           - Upon detection, enters alignment phase for precise orientation
           - Completes successfully when aligned within tolerance
-    
+
     2. **`/follow_aruco`**: The robot smoothly approaches and follows the ArUco marker with specified minimum distance, featuring smooth trapezoidal acceleration/deceleration and combined angular-linear movement.
         ```shell
             ros2 action send_goal /follow_aruco ranger_msgs/action/ArucoFollow "{marker_id: 1, min_distance: 0.5, linear_vel: 0.3, angular_vel: 0.2}" -f
@@ -121,6 +121,21 @@ This repository is a fork of [agilexrobotics/ranger_ros2](https://github.com/agi
           - Deceleration phase when approaching 140° (configurable)
           - Automatic stop at exactly 180 degrees with wraparound handling
 
+    5. **`/reverse`**: The robot moves backward by a specified distance from the detected ArUco marker using constant velocity movement.
+        ```shell
+            ros2 action send_goal /reverse ranger_msgs/action/Reverse "{marker_id: 1, reverse_distance: 0.5, velocity: 0.2}" -f
+        ``` 
+        - **Parameters:**
+          - `marker_id` (required): ArUco marker ID to track during reverse movement
+          - `reverse_distance` (required): Distance to reverse backward from current position (meters)
+          - `velocity` (optional): Linear velocity for reverse movement (default: 0.15 m/s, max: 0.3 m/s)
+        - **Behavior:**
+          - Records initial distance to marker when first detected
+          - Moves backward at constant velocity (no acceleration profile)
+          - Stops when robot has moved the specified reverse distance
+          - Target distance = initial_distance + reverse_distance
+          - Provides real-time feedback of current distance and velocity
+ 
 ## Configuration Tips
 
 ### 🔧 **Tuning for Different Environments**
@@ -215,6 +230,12 @@ The ranger_server parameters have been significantly enhanced to support advance
 | `turn_around_action.min_angular_vel` | double | 0.2 | Minimum angular velocity during turn around (rad/s) |
 | `turn_around_action.min_degree_for_decel` | double | 140.0 | Minimum rotation angle to start deceleration (degrees) |
 
+##### Reverse Action Parameters
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `reverse_action.default_vel` | double | 0.15 | Default velocity for reverse action (m/s) |
+| `reverse_action.max_vel` | double | 0.3 | Maximum allowed velocity for reverse action (m/s) |
+
 ##### System Parameters
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -303,6 +324,21 @@ The ranger_server parameters have been significantly enhanced to support advance
   - **Feedback:**
     - Current angular velocity
     - Real-time rotation progress
+
+* **`/reverse`** (`ranger_msgs::action::Reverse`)
+  - **Goal Fields:**
+    - `int64 marker_id` - Target ArUco marker ID to track during reverse movement (required)
+    - `float32 reverse_distance` - Distance to reverse backward from current position in meters (required)
+    - `float32 velocity` - Linear velocity for reverse movement (optional, uses default if ≤ 0)
+  - **Features:**
+    - Simple constant velocity backward movement
+    - Records initial marker distance and calculates target position
+    - No velocity profiles - maintains constant speed throughout
+    - Safety velocity limiting with configurable maximum
+    - Real-time distance tracking during movement
+  - **Feedback:**
+    - Current distance to marker
+    - Current velocity during reverse movement
 
 ### Debug Mode
 

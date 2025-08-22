@@ -21,6 +21,7 @@
 #include <ranger_msgs/action/aruco_search.hpp>
 #include <ranger_msgs/action/aruco_strafe.hpp>
 #include <ranger_msgs/action/turn_around.hpp>
+#include <ranger_msgs/action/reverse.hpp>
 
 using namespace std::chrono_literals;
 
@@ -41,6 +42,9 @@ public:
 
     using TurnAround = ranger_msgs::action::TurnAround;
     using GoalHandleTurnAround = rclcpp_action::ServerGoalHandle<TurnAround>;
+
+    using Reverse = ranger_msgs::action::Reverse;
+    using GoalHandleReverse = rclcpp_action::ServerGoalHandle<Reverse>;
 
     RangerServer()
     : Node("ranger_server"),
@@ -87,6 +91,13 @@ public:
       last_turn_around_control_time(this->get_clock()->now()),
       turn_around_velocity_profile_initialized(false),
       turn_around_deceleration_phase(false),
+      // Reverse Action Variables
+      reverse_active(false),
+      reverse_marker_id(-1),
+      reverse_distance(0.0),
+      reverse_velocity(0.0),
+      reverse_initial_distance(0.0),
+      reverse_target_distance(0.0),
       // Helper Variables
       marker_detected(false),
       distance_to_marker(-1.0),
@@ -95,7 +106,8 @@ public:
       last_follow_feedback_time(this->get_clock()->now()),
       last_search_feedback_time(this->get_clock()->now()),
       last_strafe_feedback_time(this->get_clock()->now()),
-      last_turn_around_feedback_time(this->get_clock()->now())
+      last_turn_around_feedback_time(this->get_clock()->now()),
+      last_reverse_feedback_time(this->get_clock()->now())
     {
         RCLCPP_INFO(this->get_logger(), "RangerServer node has been started.");
 
@@ -131,6 +143,13 @@ public:
             std::bind(&RangerServer::handle_turn_around_cancel, this, std::placeholders::_1),
             std::bind(&RangerServer::handle_turn_around_accepted, this, std::placeholders::_1));
 
+        this->reverse_action_server = rclcpp_action::create_server<Reverse>(
+            this,
+            "reverse",
+            std::bind(&RangerServer::handle_reverse_goal, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&RangerServer::handle_reverse_cancel, this, std::placeholders::_1),
+            std::bind(&RangerServer::handle_reverse_accepted, this, std::placeholders::_1));
+
         // Initialize actions result and feedback
         follow_result   = std::make_shared<ArucoFollow::Result>();
         follow_feedback = std::make_shared<ArucoFollow::Feedback>();
@@ -140,6 +159,8 @@ public:
         strafe_feedback = std::make_shared<ArucoStrafe::Feedback>();
         turn_around_result   = std::make_shared<TurnAround::Result>();
         turn_around_feedback = std::make_shared<TurnAround::Feedback>();
+        reverse_result   = std::make_shared<Reverse::Result>();
+        reverse_feedback = std::make_shared<Reverse::Feedback>();
 
         // Create subscribers and publishers using parameters
         std::string aruco_topic   = this->get_parameter("topics.aruco_markers").as_string();
@@ -176,6 +197,7 @@ public:
         RCLCPP_INFO(this->get_logger(), "Action server '/search_aruco' is ready.");
         RCLCPP_INFO(this->get_logger(), "Action server '/strafe_aruco' is ready.");
         RCLCPP_INFO(this->get_logger(), "Action server '/turn_around' is ready.");
+        RCLCPP_INFO(this->get_logger(), "Action server '/reverse' is ready.");
     }
 
 private:
@@ -184,6 +206,7 @@ private:
     rclcpp_action::Server<ArucoSearch>::SharedPtr search_action_server;
     rclcpp_action::Server<ArucoStrafe>::SharedPtr strafe_action_server;
     rclcpp_action::Server<TurnAround>::SharedPtr turn_around_action_server;
+    rclcpp_action::Server<Reverse>::SharedPtr reverse_action_server;
 
     // Publishers and subscribers
     rclcpp::Subscription<ros2_aruco_interfaces::msg::ArucoMarkers>::SharedPtr aruco_subscriber;
@@ -204,12 +227,15 @@ private:
     std::shared_ptr<ArucoStrafe::Feedback> strafe_feedback;
     std::shared_ptr<TurnAround::Result> turn_around_result;
     std::shared_ptr<TurnAround::Feedback> turn_around_feedback;
+    std::shared_ptr<Reverse::Result> reverse_result;
+    std::shared_ptr<Reverse::Feedback> reverse_feedback;
 
     // Current goal handle
     std::shared_ptr<GoalHandleArucoFollow> current_follow_goal_handle;
     std::shared_ptr<GoalHandleArucoSearch> current_search_goal_handle;
     std::shared_ptr<GoalHandleArucoStrafe> current_strafe_goal_handle;
     std::shared_ptr<GoalHandleTurnAround> current_turn_around_goal_handle;
+    std::shared_ptr<GoalHandleReverse> current_reverse_goal_handle;
 
     // Follow Action state variables
     int64_t follow_marker_id;
@@ -272,6 +298,14 @@ private:
     bool turn_around_velocity_profile_initialized;
     bool turn_around_deceleration_phase;
 
+    // Reverse Action state variables
+    bool reverse_active;
+    int64_t reverse_marker_id;
+    float reverse_distance;
+    float reverse_velocity;
+    float reverse_initial_distance;
+    float reverse_target_distance;
+
     // Marker state
     bool marker_detected;
     geometry_msgs::msg::Pose current_marker_pose;
@@ -321,6 +355,8 @@ private:
     double turn_around_decel;
     double turn_around_min_angular_vel;
     double turn_around_min_degree_for_decel;
+    double reverse_default_vel;
+    double reverse_max_vel;
     double loop_rate;
     double feedback_rate;
     bool debug_enabled;
@@ -331,6 +367,7 @@ private:
     rclcpp::Time last_search_feedback_time;
     rclcpp::Time last_strafe_feedback_time;
     rclcpp::Time last_turn_around_feedback_time;
+    rclcpp::Time last_reverse_feedback_time;
     // Parameter initialization method
     void initialize_parameters()
     {
@@ -375,6 +412,9 @@ private:
         this->declare_parameter("turn_around_action.decel", 1.0);
         this->declare_parameter("turn_around_action.min_angular_vel", 0.2);
         this->declare_parameter("turn_around_action.min_degree_for_decel", 140.0);
+        // Reverse action parameters
+        this->declare_parameter("reverse_action.default_vel", 0.15);
+        this->declare_parameter("reverse_action.max_vel", 0.3);
         // Topic parameters
         this->declare_parameter("topics.aruco_markers", "/aruco_markers");
         this->declare_parameter("topics.cmd_vel", "/cmd_vel");
@@ -439,6 +479,9 @@ private:
         turn_around_decel                 = this->get_parameter("turn_around_action.decel").as_double();
         turn_around_min_angular_vel       = this->get_parameter("turn_around_action.min_angular_vel").as_double();
         turn_around_min_degree_for_decel  = this->get_parameter("turn_around_action.min_degree_for_decel").as_double();
+        // Reverse action parameters
+        reverse_default_vel               = this->get_parameter("reverse_action.default_vel").as_double();
+        reverse_max_vel                   = this->get_parameter("reverse_action.max_vel").as_double();
         // Control Loop rate
         loop_rate         = this->get_parameter("control.loop_rate").as_double();
         feedback_rate     = this->get_parameter("control.feedback_rate").as_double();
@@ -537,7 +580,7 @@ private:
         RCLCPP_INFO(this->get_logger(), "Received goal request to follow marker ID: %ld", goal->marker_id);
         
         // Check if another action is already running
-        if (follow_active || search_active || strafe_active) {
+        if (follow_active || search_active || strafe_active || turn_around_active || reverse_active) {
             RCLCPP_WARN(this->get_logger(), "Another ranger action is already active. Rejecting new follow goal.");
             return rclcpp_action::GoalResponse::REJECT;
         }
@@ -631,7 +674,7 @@ private:
         RCLCPP_INFO(this->get_logger(), "Received goal request to search marker ID: %ld", goal->marker_id);
         
         // Check if another action is already running
-        if (follow_active || search_active || strafe_active) {
+        if (follow_active || search_active || strafe_active || turn_around_active || reverse_active) {
             RCLCPP_WARN(this->get_logger(), "Another rangeraction is already active. Rejecting new search goal.");
             return rclcpp_action::GoalResponse::REJECT;
         }
@@ -733,7 +776,7 @@ private:
         RCLCPP_INFO(this->get_logger(), "Received goal request to strafe marker ID: %ld", goal->marker_id);
     
     // Check if another action is already running
-        if (follow_active || search_active || strafe_active) {
+        if (follow_active || search_active || strafe_active || turn_around_active || reverse_active) {
             RCLCPP_WARN(this->get_logger(), "Another ranger action is already active. Rejecting new strafe goal.");
             return rclcpp_action::GoalResponse::REJECT;
         }
@@ -892,6 +935,110 @@ private:
                    turn_around_angular_vel, (turn_around_direction == 1) ? "counter-clockwise" : "clockwise");
     }
 
+    // REVERSE ACTION HANDLERS
+    rclcpp_action::GoalResponse handle_reverse_goal(
+        const rclcpp_action::GoalUUID & uuid,
+        std::shared_ptr<const Reverse::Goal> goal)
+    {
+        (void)uuid;
+        RCLCPP_INFO(this->get_logger(), "Received goal request to reverse from marker ID: %ld", goal->marker_id);
+        
+        // Check if another action is already running
+        if (follow_active || search_active || strafe_active || turn_around_active || reverse_active) {
+            RCLCPP_WARN(this->get_logger(), "Another ranger action is already active. Rejecting new reverse goal.");
+            return rclcpp_action::GoalResponse::REJECT;
+        }
+        
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    }
+
+    rclcpp_action::CancelResponse handle_reverse_cancel(
+        const std::shared_ptr<GoalHandleReverse> goal_handle)
+    {
+        RCLCPP_INFO(this->get_logger(), "Received request to cancel reverse goal");
+        (void)goal_handle;
+        
+        // Stop the robot
+        stop_robot();
+        reverse_active = false;
+        
+        return rclcpp_action::CancelResponse::ACCEPT;
+    }
+
+    void handle_reverse_accepted(const std::shared_ptr<GoalHandleReverse> goal_handle)
+    {
+        // Update parameters
+        load_parameters();
+        // Get goal request parameters
+        auto goal = goal_handle->get_goal();
+        // Mandatory request parameters
+        reverse_marker_id = goal->marker_id;
+        reverse_distance = goal->reverse_distance;
+        
+        // Optional velocity parameter with default and safety limit
+        double requested_velocity = (goal->velocity > 0.0) ? goal->velocity : reverse_default_vel;
+        reverse_velocity = std::min(requested_velocity, reverse_max_vel);
+        
+        if (requested_velocity > reverse_max_vel) {
+            RCLCPP_WARN(this->get_logger(), 
+                       "[reverse] Requested velocity %.2f m/s exceeds maximum limit %.2f m/s. Using maximum value.",
+                       requested_velocity, reverse_max_vel);
+        }
+        
+        // Check validity of goal parameters
+        bool valid = true;
+        std::string missing_fields;
+
+        // Check if marker_id is specified
+        if (reverse_marker_id <= 0) {
+            valid = false;
+            missing_fields += "marker_id ";
+        }
+        // Check if reverse_distance is specified and positive
+        if (reverse_distance <= 0.0) {
+            valid = false;
+            missing_fields += "reverse_distance ";
+        }
+
+        if (valid) {
+            current_reverse_goal_handle = goal_handle;
+            if(check_aruco_topic_availability()){
+                // Check if marker is currently detected to get initial distance
+                if (!marker_detected) {
+                    RCLCPP_WARN(this->get_logger(), 
+                               "Marker %ld not currently detected. Starting reverse action anyway - will wait for marker detection.",
+                               reverse_marker_id);
+                }
+                
+                reverse_active  = true;
+                marker_detected = false;
+                
+                // Initialize distances - will be set when first marker is detected
+                reverse_initial_distance = 0.0;
+                reverse_target_distance  = 0.0;
+                
+                RCLCPP_INFO(this->get_logger(), 
+                    "Starting reverse action for marker ID: %ld | reverse_distance: %.2f | velocity: %.2f",
+                    reverse_marker_id, reverse_distance, reverse_velocity);
+            } else {
+                reverse_active = false;
+                reverse_result->success = false;
+                reverse_result->message = "ERR: No publisher for /aruco_markers topic. Please check the aruco recognition node first.";
+                goal_handle->abort(reverse_result);
+                return;
+            }
+        } else {
+            reverse_active = false;
+            RCLCPP_WARN(this->get_logger(),
+                "Action request missing required field(s) or incorrect values: %s. Please specify them in the action request.",
+                missing_fields.c_str());
+            reverse_result->success = false;
+            reverse_result->message = "Action request failed due to missing or invalid parameters: " + missing_fields;
+            goal_handle->abort(reverse_result);
+            return;
+        }
+    }
+
     bool check_aruco_topic_availability()
     {
         // Get publisher count for the topic
@@ -916,7 +1063,7 @@ private:
 
     void aruco_callback(const ros2_aruco_interfaces::msg::ArucoMarkers::SharedPtr msg)
     {
-        if (!follow_active && !search_active && !strafe_active) return;
+        if (!follow_active && !search_active && !strafe_active && !reverse_active) return;
         
         // Look for the target marker in the message
         for (size_t i = 0; i < msg->marker_ids.size(); ++i) {
@@ -966,6 +1113,20 @@ private:
                     "Marker %ld detected at lateral offset %.3fm. Velocity profile will handle movement.", 
                     strafe_marker_id, lateral_offset);
                     
+                return;
+            }
+            // Check for reverse action
+            if (reverse_active && msg->marker_ids[i] == reverse_marker_id) {
+                current_marker_pose = msg->poses[i];
+                marker_detected = true;
+                last_marker_time = this->get_clock()->now();
+                
+                RCLCPP_DEBUG(this->get_logger(), 
+                    "Detected target marker %ld for reverse at position (%.2f, %.2f, %.2f)", 
+                    reverse_marker_id,
+                    current_marker_pose.position.x,
+                    current_marker_pose.position.y,
+                    current_marker_pose.position.z);
                 return;
             }
         }
@@ -1080,6 +1241,8 @@ private:
             control_strafe_action();
         } else if (turn_around_active && current_turn_around_goal_handle) {
             control_turn_around_action();
+        } else if (reverse_active && current_reverse_goal_handle) {
+            control_reverse_action();
         }
     }
 
@@ -1604,6 +1767,76 @@ private:
         }
     }
 
+    void control_reverse_action()
+    {
+        if (!reverse_active || !current_reverse_goal_handle) return;
+        
+        // Check if marker was detected recently using parameter-based timeout
+        if (!marker_detected || 
+            (this->get_clock()->now() - last_marker_time).seconds() > marker_timeout) {
+            
+            if (marker_detected) {
+                RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), throttle_duration,
+                    "Marker %ld not detected recently during reverse action.", reverse_marker_id);
+            }
+            
+            return;
+        }
+        
+        // Calculate current distance to marker 
+        distance_to_marker = calculate_distance_to_marker();
+        
+        // Set initial distance and target distance on first detection
+        if (reverse_initial_distance == 0.0) {
+            reverse_initial_distance = distance_to_marker;
+            reverse_target_distance  = reverse_initial_distance + reverse_distance;
+            RCLCPP_INFO(this->get_logger(), 
+                "Initial distance set: %.2f m, Target distance: %.2f m (reversing %.2f m)",
+                reverse_initial_distance, reverse_target_distance, reverse_distance);
+        }
+        
+        // Send reverse feedback (throttled)
+        if (should_publish_reverse_feedback()) {
+            reverse_feedback->distance_to_marker = std::round(distance_to_marker * 1000.0f) / 1000.0f;
+            reverse_feedback->current_velocity   = std::round(reverse_velocity * 1000.0f) / 1000.0f;
+            current_reverse_goal_handle->publish_feedback(reverse_feedback);
+        }
+        
+        // Check if we've reached the target distance (initial distance + reverse distance)
+        if (distance_to_marker >= reverse_target_distance) {
+            RCLCPP_INFO(this->get_logger(), 
+                "Reached target distance (%.2f m) from marker %ld. Reversed %.2f m successfully.", 
+                reverse_target_distance, reverse_marker_id, reverse_distance);
+            
+            stop_robot();
+            
+            // Send success result
+            reverse_result->message = "Successfully reversed " + std::to_string(reverse_distance) + "m from marker " + std::to_string(reverse_marker_id);
+            reverse_result->success = true;
+            
+            current_reverse_goal_handle->succeed(reverse_result);
+            reverse_active = false;
+            return;
+        }
+        
+        // Move backwards with constant velocity (no velocity profile)
+        auto twist_msg = geometry_msgs::msg::Twist();
+        twist_msg.linear.x = -reverse_velocity;  // Negative for backward movement
+        twist_msg.linear.y = 0.0;
+        twist_msg.linear.z = 0.0;
+        twist_msg.angular.x = 0.0;
+        twist_msg.angular.y = 0.0;
+        twist_msg.angular.z = 0.0;
+        
+        cmd_vel_publisher->publish(twist_msg);
+        
+        if (debug_enabled) {
+            RCLCPP_DEBUG(this->get_logger(), 
+                "Reversing: velocity=%.3f, current_distance=%.3f, target_distance=%.3f",
+                reverse_velocity, distance_to_marker, reverse_target_distance);
+        }
+    }
+
     // Feedback throttling helper methods
     bool should_publish_follow_feedback()
     {
@@ -1648,6 +1881,18 @@ private:
         
         if ((current_time - last_turn_around_feedback_time).seconds() >= feedback_period) {
             last_turn_around_feedback_time = current_time;
+            return true;
+        }
+        return false;
+    }
+
+    bool should_publish_reverse_feedback()
+    {
+        auto current_time = this->get_clock()->now();
+        double feedback_period = 1.0 / feedback_rate;  // Convert Hz to seconds
+        
+        if ((current_time - last_reverse_feedback_time).seconds() >= feedback_period) {
+            last_reverse_feedback_time = current_time;
             return true;
         }
         return false;
