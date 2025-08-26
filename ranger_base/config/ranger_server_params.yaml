@@ -38,7 +38,7 @@ ranger_server:
       # Trapezoidal velocity profile parameters
       accel: 1.75                  # rad/s^2 - Maximum acceleration for search action
       decel: 1.2                  # rad/s^2 - Maximum deceleration for search action
-      min_angular_vel: 0.175        # rad/s - Minimum angular velocity during search
+      min_angular_vel: 0.2        # rad/s - Minimum angular velocity during search
       min_degree_for_decel: 140.0  # degrees - Minimum rotation angle to start deceleration
 
     strafe_action:
