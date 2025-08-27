@@ -17,10 +17,13 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_action REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(aruco_detector REQUIRED)
@@ -47,7 +50,7 @@ install(TARGETS ranger_base_node
 # ranger_server node
 add_executable(ranger_server
     src/ranger_server.cpp)
-ament_target_dependencies(ranger_server rclcpp rclcpp_action ranger_msgs aruco_detector geometry_msgs sensor_msgs tf2 tf2_geometry_msgs)
+ament_target_dependencies(ranger_server rclcpp rclcpp_action ranger_msgs aruco_detector geometry_msgs sensor_msgs std_srvs cv_bridge tf2 tf2_geometry_msgs)
 
 install(TARGETS ranger_server
   DESTINATION lib/${PROJECT_NAME})
