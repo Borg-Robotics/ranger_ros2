@@ -167,8 +167,13 @@ public:
         std::string cmd_vel_topic = this->get_parameter("topics.cmd_vel").as_string();
         std::string imu_topic     = this->get_parameter("topics.imu_data").as_string();
         
+        // Use sensor data QoS to match aruco_detector publisher
+        rmw_qos_profile_t qos_profile = rmw_qos_profile_sensor_data;
+        auto qos_sensor_data = rclcpp::QoS(
+            rclcpp::QoSInitialization(qos_profile.history, 1), qos_profile);
+        
         aruco_subscriber = this->create_subscription<aruco_detector::msg::ArucoMarkers>(
-            aruco_topic, 10,
+            aruco_topic, qos_sensor_data,
             std::bind(&RangerServer::aruco_callback, this, std::placeholders::_1));
 
         cmd_vel_publisher = this->create_publisher<geometry_msgs::msg::Twist>(cmd_vel_topic, 10);
