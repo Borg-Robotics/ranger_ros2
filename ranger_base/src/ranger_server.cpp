@@ -16,7 +16,7 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 
-#include <ros2_aruco_interfaces/msg/aruco_markers.hpp>
+#include <aruco_detector/msg/aruco_markers.hpp>
 #include <ranger_msgs/action/aruco_follow.hpp>
 #include <ranger_msgs/action/aruco_search.hpp>
 #include <ranger_msgs/action/aruco_strafe.hpp>
@@ -167,7 +167,7 @@ public:
         std::string cmd_vel_topic = this->get_parameter("topics.cmd_vel").as_string();
         std::string imu_topic     = this->get_parameter("topics.imu_data").as_string();
         
-        aruco_subscriber = this->create_subscription<ros2_aruco_interfaces::msg::ArucoMarkers>(
+        aruco_subscriber = this->create_subscription<aruco_detector::msg::ArucoMarkers>(
             aruco_topic, 10,
             std::bind(&RangerServer::aruco_callback, this, std::placeholders::_1));
 
@@ -209,7 +209,7 @@ private:
     rclcpp_action::Server<Reverse>::SharedPtr reverse_action_server;
 
     // Publishers and subscribers
-    rclcpp::Subscription<ros2_aruco_interfaces::msg::ArucoMarkers>::SharedPtr aruco_subscriber;
+    rclcpp::Subscription<aruco_detector::msg::ArucoMarkers>::SharedPtr aruco_subscriber;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscriber;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_publisher;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr rotation_angle_debug_publisher;
@@ -1061,7 +1061,7 @@ private:
         }
     }
 
-    void aruco_callback(const ros2_aruco_interfaces::msg::ArucoMarkers::SharedPtr msg)
+    void aruco_callback(const aruco_detector::msg::ArucoMarkers::SharedPtr msg)
     {
         if (!follow_active && !search_active && !strafe_active && !reverse_active) return;
         

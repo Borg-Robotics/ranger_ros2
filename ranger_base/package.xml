@@ -23,7 +23,7 @@
   <depend>tf2_geometry_msgs</depend>
   <depend>ugv_sdk</depend>
   <depend>ranger_msgs</depend>
-  <depend>ros2_aruco_interfaces</depend>
+  <depend>aruco_detector</depend>
   <depend>boost</depend>
   <depend>controller_manager</depend>
 

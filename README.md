@@ -38,9 +38,9 @@ This repository is a fork of [agilexrobotics/ranger_ros2](https://github.com/agi
     ```shell
     ros2 service call /ranger_base_node/parking_service ranger_msgs/srv/TriggerParkMode "{trigger_parked_mode: true}"
     ```
-* For ArUco Marker Actions, you need to launch **aruco_recognition** and **ranger_server** node.
+* For ArUco Marker Actions, you need to launch **aruco_detector** and **ranger_server** node.
     ```shell
-        ros2 launch ros2_aruco aruco_recognition.launch.py
+        ros2 launch aruco_detector aruco_detector.launch.pyy
     ```
     ```shell
         ros2 launch ranger_base ranger_server.launch.py

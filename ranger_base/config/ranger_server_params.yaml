@@ -8,22 +8,22 @@ ranger_server:
     # Action Server Parameters
     follow_action:
       # Default velocity parameters
-      default_linear_vel: 0.8    # m/s - Default linear velocity for follow action
-      default_angular_vel: 0.15   # rad/s - Default angular velocity for follow action
+      default_linear_vel: 0.8      # m/s - Default linear velocity for follow action
+      default_angular_vel: 0.15    # rad/s - Default angular velocity for follow action
       # Maximum velocity limits (safety parameters)
-      max_linear_vel: 1.0         # m/s - Maximum allowed linear velocity
+      max_linear_vel: 1.0          # m/s - Maximum allowed linear velocity
       max_angular_vel: 0.3         # rad/s - Maximum allowed angular velocity
       # Control parameters
-      marker_timeout: 2.0         # s - Timeout for marker detection loss 
+      marker_timeout: 2.0          # s - Timeout for marker detection loss 
       # Smoothing parameters
-      angular_gain: 1.0          # Proportional gain for angular control
+      angular_gain: 1.0            # Proportional gain for angular control
       # Trapezoidal velocity profile parameters
-      accel: 3.0                # m/s^2 - Maximum acceleration
-      decel: 0.55               # m/s^2 - Maximum deceleration
-      min_dist_for_decel: 0.7   # m - Distance threshold to start deceleration
-      min_linear_vel: 0.05      # m/s - Minimum linear velocity during deceleration phase
+      accel: 3.0                   # m/s^2 - Maximum acceleration
+      decel: 0.55                  # m/s^2 - Maximum deceleration
+      min_dist_for_decel: 0.7      # m - Distance threshold to start deceleration
+      min_linear_vel: 0.05         # m/s - Minimum linear velocity during deceleration phase
       # Alignment parameters
-      alignment_tolerance: 0.01     # rad - Tolerance for alignment [Dead-Zone] (0.57 degrees)
+      alignment_tolerance: 0.01    # rad - Tolerance for alignment [Dead-Zone] (0.57 degrees)
     
     search_action:
       # Default velocity parameters
@@ -37,14 +37,14 @@ ranger_server:
       alignment_tolerance: 0.01    # rad - Tolerance for alignment phase (0.57 degrees)
       # Trapezoidal velocity profile parameters
       accel: 1.75                  # rad/s^2 - Maximum acceleration for search action
-      decel: 1.2                  # rad/s^2 - Maximum deceleration for search action
-      min_angular_vel: 0.2        # rad/s - Minimum angular velocity during search
+      decel: 1.2                   # rad/s^2 - Maximum deceleration for search action
+      min_angular_vel: 0.2         # rad/s - Minimum angular velocity during search
       min_degree_for_decel: 140.0  # degrees - Minimum rotation angle to start deceleration
 
     strafe_action:
       # Default velocity
       default_vel: 0.5             # m/s - Default velocity for strafe action
-      default_direction: 1          # 1 for left strafe, -1 for right strafe (TODO: CHECK DIRECTIONS)
+      default_direction: 1         # 1 for left strafe, -1 for right strafe (TODO: CHECK DIRECTIONS)
       # Maximum velocity limits (safety parameters)
       max_vel: 0.5                 # m/s - Maximum allowed velocity
       # Timeout parameters
@@ -64,22 +64,22 @@ ranger_server:
       # Maximum velocity limits (safety parameters)
       max_angular_vel: 1.8         # rad/s - Maximum allowed angular velocity for turn around action
       # Trapezoidal velocity profile parameters
-      accel: 1.75                 # rad/s^2 - Maximum acceleration for turn around action
+      accel: 1.75                  # rad/s^2 - Maximum acceleration for turn around action
       decel: 1.25                  # rad/s^2 - Maximum deceleration for turn around action
-      min_angular_vel: 0.2        # rad/s - Minimum angular velocity during turn around
+      min_angular_vel: 0.2         # rad/s - Minimum angular velocity during turn around
       min_degree_for_decel: 145.0  # degrees - Minimum rotation angle to start deceleration
 
     reverse_action:
       # Default velocity
-      default_vel: 0.15             # m/s - Default velocity for reverse action
+      default_vel: 0.15            # m/s - Default velocity for reverse action
       # Maximum velocity limits (safety parameters)
       max_vel: 0.3                 # m/s - Maximum allowed velocity for reverse action
       
     # Topic and frame parameters
     topics:
-      aruco_markers: "/aruco_markers"  # ArUco markers topic
-      cmd_vel: "/cmd_vel"              # Velocity command topic
-      imu_data: "/oak/imu/data"        # IMU data topic for rotation tracking
+      aruco_markers: "/aruco_detector/markers"  # ArUco markers topic
+      cmd_vel: "/cmd_vel"                       # Velocity command topic
+      imu_data: "/oak/imu/data"                 # IMU data topic for rotation tracking
       
     # Control loop parameters
     control:
@@ -88,5 +88,5 @@ ranger_server:
       
     # Logging parameters
     logging:
-      debug_enabled: true        # Enable debug logging
+      debug_enabled: true         # Enable debug logging
       throttle_duration: 2000     # ms - Duration for throttled warnings

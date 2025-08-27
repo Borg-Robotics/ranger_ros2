@@ -23,7 +23,7 @@ find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
-find_package(ros2_aruco_interfaces REQUIRED)
+find_package(aruco_detector REQUIRED)
 find_package(ranger_msgs REQUIRED)
 find_package(ugv_sdk REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
@@ -47,7 +47,7 @@ install(TARGETS ranger_base_node
 # ranger_server node
 add_executable(ranger_server
     src/ranger_server.cpp)
-ament_target_dependencies(ranger_server rclcpp rclcpp_action ranger_msgs ros2_aruco_interfaces geometry_msgs sensor_msgs tf2 tf2_geometry_msgs)
+ament_target_dependencies(ranger_server rclcpp rclcpp_action ranger_msgs aruco_detector geometry_msgs sensor_msgs tf2 tf2_geometry_msgs)
 
 install(TARGETS ranger_server
   DESTINATION lib/${PROJECT_NAME})
