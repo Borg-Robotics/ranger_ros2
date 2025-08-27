@@ -1115,7 +1115,7 @@ private:
                 last_marker_time = this->get_clock()->now();
                 
                 // Calculate lateral offset for debugging
-                float lateral_offset = std::abs(strafe_marker_pose.position.y);
+                float lateral_offset = std::abs(strafe_marker_pose.position.x);
                 
                 RCLCPP_DEBUG(this->get_logger(), 
                     "Marker %ld detected at lateral offset %.3fm. Velocity profile will handle movement.", 
@@ -1373,7 +1373,7 @@ private:
 
         // Check if we've reached alignment tolerance
         if (strafe_marker_detected) {
-            float lateral_offset = std::abs(strafe_marker_pose.position.y);
+            float lateral_offset = std::abs(strafe_marker_pose.position.x);
             if (lateral_offset <= strafe_alignment_tolerance) {
                 RCLCPP_INFO(this->get_logger(), 
                     "Aligned with marker %ld within tolerance (%.3fm). Action completed.", 
@@ -1426,7 +1426,7 @@ private:
         bool marker_found = strafe_marker_detected;
         double lateral_offset = 0.0;
         if (marker_found) {
-            lateral_offset = std::abs(strafe_marker_pose.position.y);
+            lateral_offset = std::abs(strafe_marker_pose.position.x);
         }
         
         if (!marker_found) {
@@ -1577,12 +1577,15 @@ private:
         // Check if marker is detected and we're aligned within tolerance
         if (marker_detected && alignment_marker_detected) {
             // Calculate angle to marker for alignment check
+            // In camera coordinate frame: x is left/right, z is forward (depth)
+            // We want to check if marker is centered horizontally (x ≈ 0)
             float angle_to_marker = std::atan2(
-                alignment_marker_pose.position.y, 
-                alignment_marker_pose.position.x
+                alignment_marker_pose.position.x,  // horizontal displacement 
+                alignment_marker_pose.position.z   // forward distance (depth)
             );
-            
-            // Check if we are aligned within tolerance
+
+            // Check if we are aligned within tolerance (marker should be in front, angle ≈ 0)
+            // For proper alignment, we want the marker to be straight ahead (angle close to 0)
             if (std::abs(angle_to_marker) <= search_alignment_tolerance) {
                 RCLCPP_INFO(this->get_logger(), 
                     "Aligned with marker %ld within tolerance (%.3f radians). Stopping search action.", 
@@ -1911,7 +1914,7 @@ private:
     {
         return std::sqrt(
             std::pow(current_marker_pose.position.x, 2) +
-            std::pow(current_marker_pose.position.y, 2)
+            std::pow(current_marker_pose.position.z, 2)
         );
     }
 
@@ -1921,14 +1924,14 @@ private:
         
         // Calculate angle to marker
         float angle_to_marker = std::atan2(
-            current_marker_pose.position.y,
-            current_marker_pose.position.x
+            current_marker_pose.position.x,
+            current_marker_pose.position.z
         );
-        
+
         // Angular correction within alignment tolerance [dead-zone] (proportional control)
         double angular_vel_cmd = 0.0;
         if(std::abs(angle_to_marker) > follow_alignment_tolerance) {
-            angular_vel_cmd = angle_to_marker * angular_gain;
+            angular_vel_cmd = -angle_to_marker * angular_gain; 
             // Clamp angular velocity to limits
             angular_vel_cmd = std::max(-static_cast<double>(max_angular_vel_follow),
                                      std::min(static_cast<double>(max_angular_vel_follow), angular_vel_cmd));
