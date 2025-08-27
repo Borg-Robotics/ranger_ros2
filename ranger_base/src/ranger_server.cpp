@@ -161,11 +161,6 @@ public:
         turn_around_feedback = std::make_shared<TurnAround::Feedback>();
         reverse_result   = std::make_shared<Reverse::Result>();
         reverse_feedback = std::make_shared<Reverse::Feedback>();
-
-        // Create subscribers and publishers using parameters
-        std::string aruco_topic   = this->get_parameter("topics.aruco_markers").as_string();
-        std::string cmd_vel_topic = this->get_parameter("topics.cmd_vel").as_string();
-        std::string imu_topic     = this->get_parameter("topics.imu_data").as_string();
         
         // Use sensor data QoS to match aruco_detector publisher
         rmw_qos_profile_t qos_profile = rmw_qos_profile_sensor_data;
@@ -366,6 +361,9 @@ private:
     double feedback_rate;
     bool debug_enabled;
     int throttle_duration;
+    std::string aruco_topic;
+    std::string cmd_vel_topic;
+    std::string imu_topic;
 
     // Feedback throttling variables
     rclcpp::Time last_follow_feedback_time;
@@ -421,7 +419,7 @@ private:
         this->declare_parameter("reverse_action.default_vel", 0.15);
         this->declare_parameter("reverse_action.max_vel", 0.3);
         // Topic parameters
-        this->declare_parameter("topics.aruco_markers", "/aruco_markers");
+        this->declare_parameter("topics.aruco_markers", "/aruco_detector/markers");
         this->declare_parameter("topics.cmd_vel", "/cmd_vel");
         this->declare_parameter("topics.imu_data", "/oak/imu/data");
         
@@ -493,7 +491,11 @@ private:
         // Logging parameters
         debug_enabled     = this->get_parameter("logging.debug_enabled").as_bool();
         throttle_duration = this->get_parameter("logging.throttle_duration").as_int();
-        
+        // Topics parameters
+        aruco_topic   = this->get_parameter("topics.aruco_markers").as_string();
+        cmd_vel_topic = this->get_parameter("topics.cmd_vel").as_string();
+        imu_topic     = this->get_parameter("topics.imu_data").as_string();
+
         // Initialize default values
         linear_vel   = default_linear_vel;
         angular_vel  = default_angular_vel;
@@ -654,7 +656,7 @@ private:
             } else {
                 follow_active = false;
                 follow_result->success = false;
-                follow_result->message = "ERR: No publisher for /aruco_markers topic. Please check the aruco recognition node first.";
+                follow_result->message = "ERR: No publisher for " + aruco_topic + " topic. Please check the aruco recognition node first.";
                 goal_handle->abort(follow_result);
                 return;
             }
@@ -755,7 +757,7 @@ private:
             } else {
                 search_active = false;
                 search_result->success = false;
-                search_result->message = "ERR: No publisher for /aruco_markers topic. Please check the aruco recognition node first.";
+                search_result->message = "ERR: No publisher for " + aruco_topic + " topic. Please check the aruco recognition node first.";
                 goal_handle->abort(search_result);
                 return;
             }
@@ -855,7 +857,7 @@ private:
             } else {
                 strafe_active = false;
                 strafe_result->success = false;
-                strafe_result->message = "ERR: No publisher for /aruco_markers topic. Please check the aruco recognition node first.";
+                strafe_result->message = "ERR: No publisher for " + aruco_topic + " topic. Please check the aruco recognition node first.";
                 goal_handle->abort(strafe_result);
                 return;
             }
@@ -1028,7 +1030,7 @@ private:
             } else {
                 reverse_active = false;
                 reverse_result->success = false;
-                reverse_result->message = "ERR: No publisher for /aruco_markers topic. Please check the aruco recognition node first.";
+                reverse_result->message = "ERR: No publisher for " + aruco_topic + " topic. Please check the aruco recognition node first.";
                 goal_handle->abort(reverse_result);
                 return;
             }
@@ -1047,15 +1049,16 @@ private:
     bool check_aruco_topic_availability()
     {
         // Get publisher count for the topic
-        auto publishers_info = this->get_publishers_info_by_topic("/aruco_markers");
+        auto publishers_info = this->get_publishers_info_by_topic(aruco_topic);
         
         if (publishers_info.empty()) {
             RCLCPP_WARN(this->get_logger(), 
-                "Warning: No publishers found for /aruco_markers topic. Make sure the Aruco recognition node is running.");
+                "Warning: No publishers found for %s topic. Make sure the Aruco recognition node is running.",
+                aruco_topic.c_str());
             return false;
         } else {
             RCLCPP_INFO(this->get_logger(), 
-                "Found %zu publisher(s) for /aruco_markers topic.", publishers_info.size());
+                "Found %zu publisher(s) for %s topic.", publishers_info.size(), aruco_topic.c_str());
             
             // Optionally, you can check the publisher node names
             for (const auto& pub_info : publishers_info) {
