@@ -55,7 +55,7 @@ ranger_server:
       min_vel: 0.025               # m/s - Minimum velocity during final approach
       # Alignment parameters
       alignment_tolerance: 0.05    # m - Tolerance for lateral alignment
-      min_offset_for_decel: 0.4    # m - Minimum lateral offset to start deceleration
+      min_offset_for_decel: 0.3    # m - Minimum lateral offset to start deceleration
 
     turn_around_action:
       # Default velocity
