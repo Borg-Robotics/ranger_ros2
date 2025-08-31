@@ -83,7 +83,7 @@ ranger_server:
       
     # Control loop parameters
     control:
-      loop_rate: 50.0              # Hz - Control loop frequency 
+      loop_rate: 100.0             # Hz - Control loop frequency 
       feedback_rate: 10.0          # Hz - Feedback publishing frequency [NOTE: MAX 10 HZ to Avoid feedback message flooding]
       
     # Logging parameters
