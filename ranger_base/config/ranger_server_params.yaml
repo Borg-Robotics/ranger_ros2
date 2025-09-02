@@ -71,7 +71,7 @@ ranger_server:
 
     reverse_action:
       # Default velocity
-      default_vel: 0.15            # m/s - Default velocity for reverse action
+      default_vel: 0.3             # m/s - Default velocity for reverse action
       # Maximum velocity limits (safety parameters)
       max_vel: 0.3                 # m/s - Maximum allowed velocity for reverse action
       
