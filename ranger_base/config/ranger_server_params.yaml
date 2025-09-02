@@ -18,8 +18,8 @@ ranger_server:
       # Smoothing parameters
       angular_gain: 1.0            # Proportional gain for angular control
       # Trapezoidal velocity profile parameters
-      accel: 3.0                   # m/s^2 - Maximum acceleration
-      decel: 0.55                  # m/s^2 - Maximum deceleration
+      accel: 3.0                   # m/s^2 - acceleration
+      decel: 0.58                  # m/s^2 - deceleration
       min_dist_for_decel: 0.7      # m - Distance threshold to start deceleration
       min_linear_vel: 0.05         # m/s - Minimum linear velocity during deceleration phase
       # Alignment parameters
@@ -36,8 +36,8 @@ ranger_server:
       # Alignment parameters
       alignment_tolerance: 0.03    # rad - Tolerance for alignment phase (0.57 degrees)
       # Trapezoidal velocity profile parameters
-      accel: 1.75                  # rad/s^2 - Maximum acceleration for search action
-      decel: 1.2                   # rad/s^2 - Maximum deceleration for search action
+      accel: 1.75                  # rad/s^2 - acceleration
+      decel: 1.2                   # rad/s^2 - deceleration
       min_angular_vel: 0.2         # rad/s - Minimum angular velocity during search
       min_degree_for_decel: 140.0  # degrees - Minimum rotation angle to start deceleration
 
@@ -50,8 +50,8 @@ ranger_server:
       # Timeout parameters
       strafe_timeout: 30.0
       # Acceleration/Deceleration parameters
-      accel: 0.75                  # m/s^2 - Maximum acceleration for strafe action
-      decel: 0.5                   # m/s^2 - Maximum deceleration for strafe action
+      accel: 0.75                  # m/s^2 - acceleration
+      decel: 0.5                   # m/s^2 - deceleration
       min_vel: 0.025               # m/s - Minimum velocity during final approach
       # Alignment parameters
       alignment_tolerance: 0.05    # m - Tolerance for lateral alignment
@@ -64,8 +64,8 @@ ranger_server:
       # Maximum velocity limits (safety parameters)
       max_angular_vel: 1.8         # rad/s - Maximum allowed angular velocity for turn around action
       # Trapezoidal velocity profile parameters
-      accel: 1.75                  # rad/s^2 - Maximum acceleration for turn around action
-      decel: 1.25                  # rad/s^2 - Maximum deceleration for turn around action
+      accel: 1.75                  # rad/s^2 - acceleration
+      decel: 1.25                  # rad/s^2 - deceleration
       min_angular_vel: 0.2         # rad/s - Minimum angular velocity during turn around
       min_degree_for_decel: 145.0  # degrees - Minimum rotation angle to start deceleration
 
@@ -84,7 +84,7 @@ ranger_server:
     # Control loop parameters
     control:
       loop_rate: 100.0             # Hz - Control loop frequency 
-      feedback_rate: 10.0          # Hz - Feedback publishing frequency [NOTE: MAX 10 HZ to Avoid feedback message flooding]
+      feedback_rate: 5.0           # Hz - Feedback publishing frequency [NOTE: MAX 10 HZ to Avoid feedback message flooding]
       
     # Logging parameters
     logging:
