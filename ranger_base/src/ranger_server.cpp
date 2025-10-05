@@ -978,6 +978,13 @@ private:
         load_parameters();
         // Get goal request parameters
         auto goal = goal_handle->get_goal();
+
+        // RESET STATE
+        reverse_initial_distance = 0.0;
+        reverse_target_distance  = 0.0;
+        reverse_active           = false;
+        marker_detected          = false;
+
         // Mandatory request parameters
         reverse_marker_id = goal->marker_id;
         reverse_distance = goal->reverse_distance;
