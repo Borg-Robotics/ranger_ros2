@@ -30,6 +30,7 @@ find_package(aruco_detector REQUIRED)
 find_package(ranger_msgs REQUIRED)
 find_package(ugv_sdk REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(unity_ros_interfaces REQUIRED)
 
 include_directories(
   include
@@ -55,6 +56,14 @@ ament_target_dependencies(ranger_server rclcpp rclcpp_action ranger_msgs aruco_d
 install(TARGETS ranger_server
   DESTINATION lib/${PROJECT_NAME})
 
+# ranger_vr_teleop node
+add_executable(ranger_vr_teleop
+    src/ranger_vr_teleop.cpp)
+ament_target_dependencies(ranger_vr_teleop rclcpp geometry_msgs std_msgs unity_ros_interfaces)
+
+install(TARGETS ranger_vr_teleop
+  DESTINATION lib/${PROJECT_NAME})
+  
 # launch files
 install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}/)

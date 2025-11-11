@@ -8,7 +8,7 @@
   <maintainer email="contact@westonrobot.com">TODO</maintainer>
     <author email="ziad@borgrobotic.com">Ziad Ammar</author>
   <maintainer email="ziad@borgrobotic.com">Ziad Ammar</maintainer>
-  <license>BSD</license>
+  <license>Proprietary: Internal Use Only</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
@@ -28,6 +28,7 @@
   <depend>aruco_detector</depend>
   <depend>boost</depend>
   <depend>controller_manager</depend>
+  <depend>unity_ros_interfaces</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
