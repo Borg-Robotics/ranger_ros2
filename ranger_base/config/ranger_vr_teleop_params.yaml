@@ -9,7 +9,7 @@
     
     # Maximum angular velocity (rad/s)
     # This is the rotation speed when joystick is at full left/right (+1 or -1)
-    max_angular_vel: 0.5
+    max_angular_vel: 0.75
     
     # Maximum Strafe velocity (Y-Axis Linear /cmd_vel component)
     # Left Controller joystick x-axis
