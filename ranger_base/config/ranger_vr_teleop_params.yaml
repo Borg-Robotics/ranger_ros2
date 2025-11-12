@@ -5,12 +5,16 @@
   ros__parameters:
     # Maximum linear velocity (m/s)
     # This is the velocity when joystick is at full forward/backward (+1 or -1)
-    max_linear_vel: 0.5
+    max_linear_vel: 0.7
     
     # Maximum angular velocity (rad/s)
     # This is the rotation speed when joystick is at full left/right (+1 or -1)
-    max_angular_vel: 0.3
+    max_angular_vel: 0.5
     
+    # Maximum Strafe velocity (Y-Axis Linear /cmd_vel component)
+    # Left Controller joystick x-axis
+    max_strafe_vel: 0.5
+
     # Dead band threshold (0.0 to 1.0)
     # Joystick values below this threshold will be treated as zero
     # Helps prevent drift and accidental movements
@@ -19,7 +23,7 @@
     # Publishing rate (Hz)
     # How often to publish cmd_vel messages
     # Higher rates provide smoother control but use more CPU
-    publish_rate: 20.0
+    publish_rate: 50.0
     
     # Future parameters for special motions (left controller)
     # Uncomment and adjust as needed when implementing special motions

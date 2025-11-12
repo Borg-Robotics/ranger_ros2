@@ -18,19 +18,22 @@ public:
       left_button_prev_state_(false)
   {
     // Declare and get parameters
-    this->declare_parameter("max_linear_vel", 0.5);
-    this->declare_parameter("max_angular_vel", 0.3);
+    this->declare_parameter("max_linear_vel", 0.7);
+    this->declare_parameter("max_angular_vel", 0.5);
+    this->declare_parameter("max_strafe_vel", 0.5);
     this->declare_parameter("dead_band", 0.05);
-    this->declare_parameter("publish_rate", 20.0);  // Hz
+    this->declare_parameter("publish_rate", 50.0);  // Hz
     
-    max_linear_vel_ = this->get_parameter("max_linear_vel").as_double();
+    max_linear_vel_  = this->get_parameter("max_linear_vel").as_double();
     max_angular_vel_ = this->get_parameter("max_angular_vel").as_double();
-    dead_band_ = this->get_parameter("dead_band").as_double();
+    max_strafe_vel_  = this->get_parameter("max_strafe_vel").as_double();
+    dead_band_       = this->get_parameter("dead_band").as_double();
     double publish_rate = this->get_parameter("publish_rate").as_double();
     
     RCLCPP_INFO(this->get_logger(), "Starting Ranger VR Teleop Node");
     RCLCPP_INFO(this->get_logger(), "Max Linear Velocity: %.2f m/s", max_linear_vel_);
     RCLCPP_INFO(this->get_logger(), "Max Angular Velocity: %.2f rad/s", max_angular_vel_);
+    RCLCPP_INFO(this->get_logger(), "Max Strafe Velocity: %.2f m/s", max_strafe_vel_);
     RCLCPP_INFO(this->get_logger(), "Dead Band: %.2f", dead_band_);
     RCLCPP_INFO(this->get_logger(), "Press PRIMARY BUTTON on RIGHT controller (A) to enable/disable base teleoperation");
     RCLCPP_INFO(this->get_logger(), "Press PRIMARY BUTTON on LEFT controller (X) to enable/disable special motions");
@@ -38,6 +41,7 @@ public:
     // Initialize velocity commands to zero
     current_linear_vel_ = 0.0;
     current_angular_vel_ = 0.0;
+    current_strafe_vel_ = 0.0;
     
     // Create subscribers for VR controllers
     right_controller_sub_ = this->create_subscription<unity_ros_interfaces::msg::Controller>(
@@ -151,23 +155,28 @@ private:
     if (!left_teleop_enabled_) {
       left_joystick_x_ = 0.0;
       left_joystick_y_ = 0.0;
+      current_strafe_vel_ = 0.0;
       return;
     }
     
-    // Reserved for future special motions like:
-    // - Crab walk (strafing)
-    // - In-place rotation
-    // - Other custom movements
+    // Apply dead band to left joystick X axis for strafe movement
+    double strafe_input = applyDeadBand(msg->joystick_x);
     
-    // Store the values for future use
-    left_joystick_x_ = applyDeadBand(msg->joystick_x);
+    // Map joystick_x to strafe velocity (left/right strafing)
+    // Positive X = turn right = strafe right = negative linear.y
+    // Negative X = turn left = strafe left = positive linear.y
+    current_strafe_vel_ = -strafe_input * max_strafe_vel_;
+    
+    // Store the values for future use if needed
+    left_joystick_x_ = strafe_input;
     left_joystick_y_ = applyDeadBand(msg->joystick_y);
     
-    // TODO: Implement special motions here when needed
-    // Example implementation when ready:
-    // if (left_joystick_x_ != 0.0) {
-    //   // Implement crab walk
-    // }
+    // Log strafe velocity for debugging (only when non-zero)
+    if (std::abs(current_strafe_vel_) > 0.01) {
+      RCLCPP_DEBUG(this->get_logger(), 
+                   "Left Controller - Strafe: %.2f", 
+                   current_strafe_vel_);
+    }
   }
   
   // Publish cmd_vel at fixed rate
@@ -176,7 +185,7 @@ private:
     auto twist_msg = geometry_msgs::msg::Twist();
     
     twist_msg.linear.x = current_linear_vel_;
-    twist_msg.linear.y = 0.0;
+    twist_msg.linear.y = current_strafe_vel_;
     twist_msg.linear.z = 0.0;
     
     twist_msg.angular.x = 0.0;
@@ -195,11 +204,13 @@ private:
   // Parameters
   double max_linear_vel_;
   double max_angular_vel_;
+  double max_strafe_vel_;
   double dead_band_;
   
   // Current velocity commands
   double current_linear_vel_;
   double current_angular_vel_;
+  double current_strafe_vel_;
   
   // Left controller joystick values (for future use)
   double left_joystick_x_;
