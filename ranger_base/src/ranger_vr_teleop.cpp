@@ -35,8 +35,8 @@ public:
     RCLCPP_INFO(this->get_logger(), "Max Angular Velocity: %.2f rad/s", max_angular_vel_);
     RCLCPP_INFO(this->get_logger(), "Max Strafe Velocity: %.2f m/s", max_strafe_vel_);
     RCLCPP_INFO(this->get_logger(), "Dead Band: %.2f", dead_band_);
-    RCLCPP_INFO(this->get_logger(), "Press PRIMARY BUTTON on RIGHT controller (A) to enable/disable base teleoperation");
-    RCLCPP_INFO(this->get_logger(), "Press PRIMARY BUTTON on LEFT controller (X) to enable/disable special motions");
+    RCLCPP_INFO(this->get_logger(), "Press SECONDARY BUTTON on RIGHT controller (B) to enable/disable base teleoperation");
+    RCLCPP_INFO(this->get_logger(), "Press SECONDARY BUTTON on LEFT controller (Y) to enable/disable special motions");
     
     // Initialize velocity commands to zero
     current_linear_vel_ = 0.0;
@@ -87,8 +87,8 @@ private:
   // Right controller callback - used for base movement
   void rightControllerCallback(const unity_ros_interfaces::msg::Controller::SharedPtr msg)
   {
-    // Detect primary button press (rising edge) for toggle
-    if (msg->primary_button_pressed && !right_button_prev_state_) {
+    // Detect secondary button press (rising edge) for toggle
+    if (msg->secondary_button_pressed && !right_button_prev_state_) {
       // Button just pressed - toggle teleop state
       right_teleop_enabled_ = !right_teleop_enabled_;
       
@@ -103,7 +103,7 @@ private:
     }
     
     // Update previous button state
-    right_button_prev_state_ = msg->primary_button_pressed;
+    right_button_prev_state_ = msg->secondary_button_pressed;
     
     // Only process joystick input if teleoperation is enabled
     if (!right_teleop_enabled_) {
@@ -136,8 +136,8 @@ private:
   // Left controller callback - reserved for special motions
   void leftControllerCallback(const unity_ros_interfaces::msg::Controller::SharedPtr msg)
   {
-    // Detect primary button press (rising edge) for toggle
-    if (msg->primary_button_pressed && !left_button_prev_state_) {
+    // Detect secondary button press (rising edge) for toggle
+    if (msg->secondary_button_pressed && !left_button_prev_state_) {
       // Button just pressed - toggle special motion state
       left_teleop_enabled_ = !left_teleop_enabled_;
       
@@ -149,7 +149,7 @@ private:
     }
     
     // Update previous button state
-    left_button_prev_state_ = msg->primary_button_pressed;
+    left_button_prev_state_ = msg->secondary_button_pressed;
     
     // Only process joystick input if special motions are enabled
     if (!left_teleop_enabled_) {
